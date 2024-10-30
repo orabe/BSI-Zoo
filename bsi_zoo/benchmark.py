@@ -29,8 +29,9 @@ def _run_estimator(
     this_results = dict(estimator=estimator_name)
 
     try:
-        y, L, x, cov, _ = memory.cache(get_data)(**this_data_args, seed=seed)
-
+        # disable the caching temporarily for debuging
+        # y, L, x, cov, _ = memory.cache(get_data)(**this_data_args, seed=seed)
+        y, L, x, cov, _ = get_data(**this_data_args, seed=seed)
         n_orient = 3 if this_data_args["orientation_type"] == "free" else 1
 
         if this_data_args["cov_type"] == "diag":
@@ -144,8 +145,33 @@ class Benchmark:
                 )
             )
         else:
-            results = Parallel(n_jobs=self.n_jobs)(
-                delayed(_run_estimator)(
+            # results = Parallel(n_jobs=self.n_jobs)(
+            #     delayed(_run_estimator)(
+            #         self.subject,
+            #         estimator,
+            #         self.metrics,
+            #         this_data_args,
+            #         this_estimator_args,
+            #         seed,
+            #         estimator_name=self.estimator.__name__,
+            #         memory=self.memory,
+            #         do_spatial_cv=self.do_spatial_cv,
+            #     )
+            #     for this_data_args, seed, this_estimator_args in itertools.product(
+            #         ParameterGrid(self.data_args),
+            #         seeds,
+            #         ParameterGrid(self.estimator_args),
+            #     )
+            # )
+            
+            # no parallelization, no Cartesian product of parameter
+            results = []
+            for this_data_args, seed, this_estimator_args in itertools.product(
+                ParameterGrid(self.data_args),
+                seeds,
+                ParameterGrid(self.estimator_args),
+            ):
+                result = _run_estimator(
                     self.subject,
                     estimator,
                     self.metrics,
@@ -156,12 +182,7 @@ class Benchmark:
                     memory=self.memory,
                     do_spatial_cv=self.do_spatial_cv,
                 )
-                for this_data_args, seed, this_estimator_args in itertools.product(
-                    ParameterGrid(self.data_args),
-                    seeds,
-                    ParameterGrid(self.estimator_args),
-                )
-            )
+                results.append(result)
 
         results = pd.DataFrame(results)
         return results
