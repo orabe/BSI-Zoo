@@ -21,10 +21,10 @@ metrics = [
     f1,
     reconstructed_noise,
 ]  # list of metric functions here
-nnzs = [3, 5] # number non-zero sources. Used to randomly select a subset of n_sources indices
+nnzs = [5] # number non-zero sources. Used to randomly select a subset of n_sources indices
 # nnzs = [1]
-# alpha_SNR = [0.99, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01]
-alpha_SNR = [0.01, 0.99]
+alpha_SNR = [0.99, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01]
+# alpha_SNR = [0.5]
 # estimator_alphas = [
 #     0.01,
 #     0.01544452,
@@ -35,11 +35,11 @@ alpha_SNR = [0.01, 0.99]
 #     0.13572088,
 #     0.2096144,
 # ]  # logspaced
-# estimator_alphas = np.logspace(0, -2, 20)[1:]
-estimator_alphas = [0.7]
+estimator_alphas = np.logspace(0, -2, 20)[1:]
+# estimator_alphas = [0.5]
 memory = Memory(".")
 
-path_to_leadfield = None
+path_to_leadfield = 'bsi_zoo/meta/leadfield_fixed.npz'
 orientation_type = "fixed"
 data_args_II = {
     # "n_sensors": [50],
