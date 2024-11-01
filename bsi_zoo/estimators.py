@@ -1,7 +1,7 @@
 from mne.utils import logger, warn
 from mne.inverse_sparse.mxne_optim import groups_norm2, _mixed_norm_solver_bcd
 from numpy.core.fromnumeric import mean
-from numpy.lib import diag
+from numpy import diag
 from scipy.sparse import spdiags
 
 from scipy import linalg
