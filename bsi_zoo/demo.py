@@ -48,7 +48,7 @@ def run(
             extra_params=estimator_extra_params,
         ).fit(L=L, y=y)
 
-        x_hat = estimator_.predict(y)
+        x_hat, posterior_cov = estimator_.predict(y)
             
         if data_args["orientation_type"] == "free":
             x_hat = x_hat.reshape(x.shape)

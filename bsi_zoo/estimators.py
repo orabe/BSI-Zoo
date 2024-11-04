@@ -278,6 +278,8 @@ def _gamma_map_opt(
         Estimated source time courses.
     active_set : array, shape=(n_active,)
         Indices of active sources.
+    posterior_cov: array, shape=(n_active, n_active)
+        Posterior coveriance matrix of estimated active sources
     """
     from scipy import linalg
 
@@ -338,6 +340,7 @@ def _gamma_map_opt(
         CMinv = np.dot(U / (S + eps), U.T)
         CMinvG = np.dot(CMinv, G)
         A = np.dot(CMinvG.T, M)  # mult. w. Diag(gamma) in gamma update
+        # G_CMinvG = G.T @ CMinvG
 
         if update_mode == 1:
             # MacKay fixed point update (10) in [1]
@@ -401,7 +404,13 @@ def _gamma_map_opt(
     n_const = np.sqrt(M_normalize_constant) / G_normalize_constant
     x_active = n_const * gammas[:, None] * A
 
-    return x_active, active_set
+    # Compute the posterior convariance matrix as in eq. (2.10) in Hashemi, Ali. "Advances in hierarchical Bayesian learning with applications to neuroimaging." (2023).
+    # pos_cov =  np.diag(gammas) - gammas[:, np.newaxis] * G_CMinvG * gammas
+    posterior_cov = np.diag(gammas) - gammas[:, np.newaxis] * G.T @ CMinv @ G * gammas 
+    # A similar approach can be implmented (as Large_gamma is interpreted as adiagonal matrix with small_gammas:
+    # posterior_cov = np.diag(gammas) - np.diag(gammas) @ G.T @ CMinv @ G @ np.diag(gammas)
+    
+    return x_active, active_set, posterior_cov
 
 
 class Solver(BaseEstimator, ClassifierMixin):
@@ -940,7 +949,7 @@ def gamma_map(
     whitener = linalg.inv(linalg.sqrtm(cov))
     y = whitener @ y
     L = whitener @ L
-    x_hat_, active_set = _gamma_map_opt(
+    x_hat_, active_set, posterior_cov = _gamma_map_opt(
         y,
         L,
         alpha=alpha,
@@ -957,7 +966,7 @@ def gamma_map(
     if n_orient > 1:
         x_hat = x_hat.reshape((-1, n_orient, x_hat.shape[1]))
 
-    return x_hat
+    return x_hat, posterior_cov
 
 
 def champagne(
