@@ -966,7 +966,7 @@ def gamma_map(
     if n_orient > 1:
         x_hat = x_hat.reshape((-1, n_orient, x_hat.shape[1]))
 
-    return x_hat, posterior_cov
+    return x_hat, active_set, posterior_cov
 
 
 def champagne(
