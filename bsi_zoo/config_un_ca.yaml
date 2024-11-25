@@ -8,14 +8,14 @@ random_state: 42
 
 estimator: "gamma_map"
 estimator_args:
-  alpha: 0.01 # regularization parameter
+  alpha: 0.5 # regularization parameter
 estimator_extra_params:
   update_mode: 2
   max_iter: 1000
   tol: 1e-15
   gammas: # gamma initialization
     fixed: 
-      enabled: false
+      enabled: true
       value: 0.001 # small positive number
     random_uniform:
       enabled: false
@@ -28,7 +28,7 @@ estimator_extra_params:
 data_args_II:
     orientation_type: "fixed"
     cov_type: "full"
-    alpha_SNR: 0.01
+    alpha_SNR: 0.99
     nnz: 5
     n_times: 2
 
