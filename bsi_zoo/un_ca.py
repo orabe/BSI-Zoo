@@ -332,6 +332,7 @@ for stc, title in source_estimates:
     for orientation in orientations:
         orientation_dir = os.path.join(experiment_dir, 'brain', orientation)
         os.makedirs(orientation_dir, exist_ok=True)
+        brain.show_view(orientation)
         brain.save_image(os.path.join(orientation_dir, f'{title.replace(" ", "_").lower()}_{orientation}.png'))
 
     stc_fs = mne.compute_source_morph(
@@ -349,9 +350,11 @@ for stc, title in source_estimates:
     )
     
     brain_fs.save_image(os.path.join(experiment_dir, 'brain', f'{title.replace(" ", "_").lower()}_flat.png'))
+    brain.close()
+    brain_fs.close()
     
 
-input("Press Enter to close the plots...")
+# input("Press Enter to close the plots...")
 
 
 

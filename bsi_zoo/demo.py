@@ -30,11 +30,12 @@ data_path = Path(config['data_path'])
 spatial_cv = config['spatial_cv']
 subject = config['subject']
 
-orientation_type = config['data_args_II']['orientation_type']
-cov_type = config['data_args_II']['cov_type']
-alpha_SNR = config['data_args_II']['alpha_SNR']
-nnzs = config['data_args_II']['nnz']
-n_times = config['data_args_II']['n_times']
+data_args_II = config['data_args_II']
+orientation_type = data_args_II['orientation_type']
+cov_type = data_args_II['cov_type']
+alpha_SNR = data_args_II['alpha_SNR']
+nnzs = data_args_II['nnz']
+n_times = data_args_II['n_times']
 
 
 if config['estimator'] == 'gamma_map':
@@ -52,6 +53,7 @@ L = lead_field["lead_field"]
 # Check which gamma initialization method is enabled
 if gamma_init['fixed']['enabled']:
     estimator_extra_params['gammas'] = np.full((L.shape[1],), gamma_init['fixed']['value'], dtype=np.float64)
+    gamma_init_method = 'small_positive_fixed'
 elif gamma_init['random_uniform']['enabled']:
     rng = check_random_state(random_state)
     estimator_extra_params['gammas'] = rng.uniform(
@@ -59,9 +61,12 @@ elif gamma_init['random_uniform']['enabled']:
         high=gamma_init['random_uniform']['high'],
         size=(L.shape[1],)
     )
+    gamma_init_method = 'random_uniform'
+
 elif gamma_init['ones']['enabled']:
     estimator_extra_params['gammas'] = None
-    
+    gamma_init_method = 'ones'
+
 estimator_extra_params['tol'] = float(estimator_extra_params['tol'])
 
 # Memory and job settings
@@ -82,10 +87,6 @@ data_args_II = {
     "alpha": alpha_SNR, 
 }
 
-# estimator = gamma_map
-# estimator_args = {"alpha": estimator_alphas}
-# estimator_extra_params = {"update_mode": 2, "max_iter":1000, "tol":1e-15}
-
 # Metrics for benchmarking
 metrics = [
     # euclidean_distance,
@@ -94,11 +95,6 @@ metrics = [
     # f1,
     # reconstructed_noise,
 ]
-
-# Memory and job settings. Not really used as we will consider one experiment at once
-# memory = Memory(".")
-# n_jobs = 30
-# nruns = 1
 
 results = dict(estimator=estimator.__name__) 
 

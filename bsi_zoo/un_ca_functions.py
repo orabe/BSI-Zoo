@@ -152,8 +152,8 @@ def plot_active_sources_single_time_step(x, x_hat, active_set, time_step=0, expe
     est_amplitudes = x_hat[active_set, time_step]
     
     plt.figure(figsize=(12, 6))
-    plt.scatter(gt_active_sources, gt_amplitudes, color='blue', alpha=0.6, label='Ground Truth')
-    plt.scatter(active_set, est_amplitudes, color='red', marker='x', alpha=0.6, label='Estimated')
+    plt.scatter(gt_active_sources, gt_amplitudes, color='blue', alpha=0.6, label=f'Ground Truth (nnz={gt_active_sources.size})')
+    plt.scatter(active_set, est_amplitudes, color='red', marker='x', alpha=0.6, label=f'Estimated (nnz={active_set.size})')
     plt.xlabel('Source Index')
     plt.ylabel('Amplitude')
     plt.title('Active Sources for GT and Estimated Sources')
