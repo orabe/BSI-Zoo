@@ -8,6 +8,8 @@ from sklearn.utils import check_random_state
 import yaml
 from joblib import Memory
 from pathlib import Path
+from mne.viz import plot_source_estimates
+from mne.datasets import fetch_fsaverage, sample
 
 # Load configuration parameters from the config file
 config_path = "bsi_zoo/config_un_ca.yaml"
@@ -50,17 +52,7 @@ elif gamma_init_method['ones']['enabled']:
     
 estimator_extra_params['tol'] = float(estimator_extra_params['tol'])
 
-
-
 data = np.load('bsi_zoo/data/est_data.npz', allow_pickle=True)
-# data_args_II=data['data_args_II'].item()
-# nnz = data_args_II['nnz']
-# alpha_SNR = data_args_II['alpha']
-
-# estimator_args=data['estimator_args'].item()
-# estimator_alpha = estimator_args['alpha']
-
-# estimator_extra_params=data['estimator_extra_params']
 
 x = data['x']  # Ground truth sources
 x_hat = data['x_hat']  # Estimated sources
@@ -71,14 +63,34 @@ cov = data['cov']  # Covariance matrix
 
 posterior_cov = data['posterior_cov']  # Posterior covariance matrix
 
-# Create a directory structure based on the hyperparameters
-def create_directory_structure(base_dir, params):
-    path = base_dir
-    for key, value in params.items():
-        path = os.path.join(path, f"{key}_{value}")
-    os.makedirs(path, exist_ok=True)
-    return path
+# --------------------------------------------------------------------------------
 
+# Create a full covariance matrix with zeros
+full_posterior_cov = np.zeros((x_hat.shape[0], x_hat.shape[0]))
+
+# Fill in the active set covariance values
+for i, idx_i in enumerate(active_set):
+    for j, idx_j in enumerate(active_set):
+        full_posterior_cov[idx_i, idx_j] = posterior_cov[i, j]
+
+# Test the shape of the full posterior covariance matrix
+non_zero_values = full_posterior_cov[full_posterior_cov != 0]
+assert non_zero_values.size == posterior_cov.size == active_set.size ** 2
+# def check_symmetric(a, rtol=1e-03, atol=1e-03):
+#     print(np.allclose(a, a.T, rtol=rtol, atol=atol))
+# check_symmetric(posterior_cov)
+
+# # Ensure positive definiteness
+# def is_pos_def(x):
+#     if not np.all(np.linalg.eigvals(x) > 0):
+#         regularization_strength = 1e-6  # Adjust as necessary
+#         x += np.eye(x.shape[0]) * regularization_strength
+#         return False
+#     else:
+#         return True
+
+
+# --------------------------------------------------------------------------------
 # Define the hyperparameters
 hyperparameters = {
     "estimator": estimator.__name__,
@@ -96,50 +108,14 @@ hyperparameters = {
 base_dir = "experiment_results"
 experiment_dir = create_directory_structure(base_dir, hyperparameters)
 
-# # Save the plots in the structured directory
-# brain_gt.save_image(os.path.join(experiment_dir, 'brain_gt.png'))
-# brain_mean.save_image(os.path.join(experiment_dir, 'brain_mean.png'))
-# brain_var.save_image(os.path.join(experiment_dir, 'brain_var.png'))
-# brain_zscore.save_image(os.path.join(experiment_dir, 'brain_zscore.png'))
-
-# Create a full covariance matrix with zeros
-full_posterior_cov = np.zeros((x_hat.shape[0], x_hat.shape[0]))
-
-# Fill in the active set covariance values
-for i, idx_i in enumerate(active_set):
-    for j, idx_j in enumerate(active_set):
-        full_posterior_cov[idx_i, idx_j] = posterior_cov[i, j]
-
-# Test the shape of the full posterior covariance matrix
-non_zero_values = full_posterior_cov[full_posterior_cov != 0]
-assert non_zero_values.size == posterior_cov.size == active_set.size ** 2
-# posterior_mean = x_hat[active_set]  # Posterior mean
-# posterior_mean = posterior_mean[0:10] # [0:10, :]
-# posterior_cov = posterior_cov[0:10, 0:10]
-
-# Crop the data to the first 10 sources and time points
-
-
-# def check_symmetric(a, rtol=1e-03, atol=1e-03):
-#     print(np.allclose(a, a.T, rtol=rtol, atol=atol))
-# check_symmetric(posterior_cov)
-
-# # Ensure positive definiteness
-# def is_pos_def(x):
-#     if not np.all(np.linalg.eigvals(x) > 0):
-#         regularization_strength = 1e-6  # Adjust as necessary
-#         x += np.eye(x.shape[0]) * regularization_strength
-#         return False
-#     else:
-#         return True
-
-
+# --------------------------------------------------------------------------------
 plot_active_sources_single_time_step(x, x_hat, active_set, time_step=0, experiment_dir=experiment_dir)
 plot_posterior_covariance_matrix(posterior_cov, experiment_dir)
 
 # visualize_active_sources(x_hat, active_set, 'Posterior Mean Over Time')
 # visualize_active_sources(x, np.where(x[:, 0] != 0)[0], 'Ground Truth Source Activity Over Time')
 
+# --------------------------------------------------------------------------------
 
 x_t0 = x[:, 0]
 x_hat_t0 = x_hat[:, 0]
@@ -181,7 +157,7 @@ plot_proportion_of_hits(
     experiment_dir=experiment_dir)
 
 # --------------------------------------------------------------------------------
-from mne.datasets import fetch_fsaverage, sample
+# load src space
 
 data_path = sample.data_path()
 subject = "fsaverage"
@@ -215,99 +191,8 @@ if x.shape[0] != n_sources:
     raise ValueError(f"Data has {x.shape[0]} sources, but source space has {n_sources} sources!")
 
 
-# # Create SourceEstimate object
-# tmin = 0.0 
-# stc = mne.SourceEstimate(x, vertices=vertices, tmin=tmin, tstep=1/sfreq)
-
-# # Plot the source time courses
-# # initial_time = 0.0  # Time point to plot
-# stc.plot(subject='fsaverage',
-#          hemi='both', 
-#         #  initial_time=initial_time,
-#          subjects_dir=subjects_dir)
-
-
-# mpl_fig = stc.plot(
-#     subject='fsaverage',
-#     subjects_dir=subjects_dir,
-#     # initial_time=initial_time,
-#     hemi='rh',
-#     backend="matplotlib",
-#     # clim=dict(kind='value', lims=[-7, 7, 15]),
-#     verbose="error",
-#     smoothing_steps=5
-# )
-
-# stc_fs = mne.compute_source_morph(
-#     stc, "sample", "fsaverage", subjects_dir, smooth=5, verbose="error"
-# ).apply(stc)
-# brain = stc_fs.plot(
-#     subjects_dir=subjects_dir,
-#     # initial_time=initial_time,
-#     clim=dict(kind="value", lims=[3, 6, 9]),
-#     surface="flat",
-#     hemi="both",
-#     size=(1000, 500),
-#     smoothing_steps=5,
-#     time_viewer=False,
-#     add_data_kwargs=dict(colorbar_kwargs=dict(label_font_size=10)),
-# )
-
-# # to help orient us, let's add a parcellation (red=auditory, green=motor,
-# # blue=visual)
-# brain.add_annotation("HCPMMP1_combined", borders=2)
-# brain.save_movie(time_dilation=20, 
-#                  interpolation='linear', framerate=10)
-
-
-# # 0000000000000 STC EST
-# stc_xhat = mne.SourceEstimate(x_hat, vertices=vertices, tmin=tmin, tstep=1/sfreq)
-
-# # Plot the source time courses
-# # initial_time = 0.0  # Time point to plot
-# stc_xhat.plot(subject='fsaverage',
-#          hemi='both', 
-#         #  initial_time=initial_time,
-#          subjects_dir=subjects_dir)
-
-
-# mpl_fig_xhat = stc_xhat.plot(
-#     subject='fsaverage',
-#     subjects_dir=subjects_dir,
-#     # initial_time=initial_time,
-#     hemi='rh',
-#     backend="matplotlib",
-#     # clim=dict(kind='value', lims=[-7, 7, 15]),
-#     verbose="error",
-#     smoothing_steps=5
-# )
-
-# stc_fs_xhat = mne.compute_source_morph(
-#     stc_xhat, "sample", "fsaverage", subjects_dir, smooth=5, verbose="error"
-# ).apply(stc_xhat)
-
-# brain = stc_fs_xhat.plot(
-#     subjects_dir=subjects_dir,
-#     # initial_time=initial_time,
-#     clim=dict(kind="value", lims=[3, 6, 9]),
-#     surface="flat",
-#     hemi="both",
-#     size=(1000, 500),
-#     smoothing_steps=5,
-#     time_viewer=False,
-#     add_data_kwargs=dict(colorbar_kwargs=dict(label_font_size=10)),
-# )
-
-# # to help orient us, let's add a parcellation (red=auditory, green=motor,
-# # blue=visual)
-# brain.add_annotation("HCPMMP1_combined", borders=2)
-# brain.save_movie(time_dilation=20, tmin=0.05, tmax=0.16,
-#                  interpolation='linear', framerate=10)
-
-
-
 # --------------------------------------------------------------------------------
-from mne.viz import plot_source_estimates
+# Plot the source estimates
 
 posteroir_var = np.diag(full_posterior_cov)
 z_score = x_hat_t0 / (np.sqrt(posteroir_var) + 1e-10)  # mean / std

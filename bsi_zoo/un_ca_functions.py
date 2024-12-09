@@ -11,6 +11,16 @@ from scipy import linalg
 
 # ----- Main Functions -----
 
+def create_directory_structure(base_dir, params):
+    experiment_dir = base_dir
+    for key, value in params.items():
+        experiment_dir = os.path.join(experiment_dir, f"{key}_{value}")
+    if os.path.exists(experiment_dir):
+        print(f"Directory {experiment_dir} already exists. Skipping creation.")
+        return None
+    os.makedirs(experiment_dir)
+    return experiment_dir
+
 def run(
     estimator,
     subject,
