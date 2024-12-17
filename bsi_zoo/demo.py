@@ -19,8 +19,17 @@ from mne.datasets import fetch_fsaverage, sample
 import multiprocessing
 
 
-# load src space
+mean = np.random.randn(10)
+cov = np.random.randn(10, 10)
+cov = np.dot(cov, cov.T)
 
+top_k = 5
+plot_sorted_variances(cov, "experiment_results", top_k=top_k)
+visualize_sorted_covariances(cov, "experiment_results", top_k=top_k)
+plot_top_relevant_CE_pairs(mean, cov, "experiment_results", top_k=5, confidence_level=0.95)
+
+
+# load src space
 data_path = sample.data_path()
 subject = "fsaverage"
 subjects_dir = data_path / "subjects"
@@ -129,23 +138,23 @@ base_dir = "experiment_results"
 estimators = [gamma_map]
 orientation_types = ["fixed"]
 cov_types = ["full"]
-alpha_snrs = [0.01, 0.1, 0.4, 0.6, 0.8, 0.99]
-nnzs = [1, 2, 5]
+alpha_snrs = [0.8]
+nnzs = [5]
 n_times = 2
-estimator_alphas = [0.01, 0.1, 0.4, 0.6, 0.8, 0.99] # np.logspace(0, -2, 10)[1:]
+estimator_alphas = [0] # np.logspace(0, -2, 10)[1:]
 estimator_args = {"alpha": estimator_alphas}
 estimator_extra_params = {
     "update_mode": 2,
     "max_iter": 1000,
     "tol": 1e-15,
     "gammas": {
-        "fixed": {
-            "value": 0.001
-        },
-        "random_uniform": {
-            "low": 0.001,
-            "high": 0.1
-        },
+        # "fixed": {
+        #     "value": 0.001
+        # },
+        # "random_uniform": {
+        #     "low": 0.001,
+        #     "high": 0.1
+        # },
         "ones": {
             "value": 1.0
         }
@@ -232,6 +241,9 @@ for estimator in estimators:
                                 
                                 print("------------------ Done! ------------------")
 
+                                x_t0 = x[:, 0]
+                                x_hat_t0 = x_hat[:, 0]
+                                
                                 # Create a full covariance matrix with zeros
                                 full_posterior_cov = np.zeros((x_hat.shape[0], x_hat.shape[0]))
 
@@ -244,6 +256,15 @@ for estimator in estimators:
                                 non_zero_values = full_posterior_cov[full_posterior_cov != 0]
                                 assert non_zero_values.size == posterior_cov.size == active_set.size ** 2
                                 
+                                
+                                # ------------------------------------------------------
+                                # Vizualise Confidence Ellipses
+                                top_k = 5
+                                plot_sorted_variances(posterior_cov, experiment_dir, top_k=top_k)
+                                visualize_sorted_covariances(posterior_cov, experiment_dir, top_k=top_k)
+                                plot_top_relevant_CE_pairs(x_hat_t0[active_set], posterior_cov, experiment_dir, top_k=5, confidence_level=0.95)
+
+                                
                                 # ------------------------------------------------------
                                 
                                 plot_active_sources_single_time_step(x, x_hat, active_set, time_step=0, experiment_dir=experiment_dir)
@@ -252,8 +273,6 @@ for estimator in estimators:
                                 
                                 # ------------------------------------------------------
                                                                 
-                                x_t0 = x[:, 0]
-                                x_hat_t0 = x_hat[:, 0]
 
                                 confidence_levels = np.linspace(0.1, 0.99, 10)
                                 CI_count_per_confidence_level = []
@@ -261,22 +280,29 @@ for estimator in estimators:
                                     os.makedirs(os.path.join(experiment_dir, 'CI'))
                                 
                                     for confidence_level in confidence_levels:    
+                                        # ci_lower, ci_upper = compute_confidence_intervals(
+                                        #     x_hat_t0, full_posterior_cov, confidence_level
+                                        # )
+                                        
                                         ci_lower, ci_upper = compute_confidence_intervals(
-                                            x_hat_t0, full_posterior_cov, confidence_level
+                                            x_hat_t0[active_set], posterior_cov, confidence_level
                                         )
-                                        count_within_ci = count_values_within_ci(x_t0, ci_lower, ci_upper)
+                                        
+                                        count_within_ci = count_values_within_ci(x_t0[active_set], ci_lower, ci_upper)
+                                        
                                         print(f"Confidence lvl: {confidence_level:.2f}, Count Within CI: {count_within_ci}")
                                         CI_count_per_confidence_level.append(count_within_ci)
 
-                                        plot_ci_times(x_hat_t0[:, np.newaxis][active_set],
-                                                ci_lower[:, np.newaxis][active_set],
-                                                ci_upper[:, np.newaxis][active_set],
-                                                x_t0[:, np.newaxis][active_set],
-                                                active_set,
-                                                figsize=(30,7),
-                                                title=f'confidence level {(confidence_level*100):.0f}%',
-                                                experiment_dir=os.path.join(experiment_dir, 'CI'),
-                                                filename=f'CI_{round(confidence_level, 2)}.png',)
+                                        plot_ci_times(
+                                            x_hat_t0[:, np.newaxis][active_set],
+                                            ci_lower[:, np.newaxis],#[active_set],
+                                            ci_upper[:, np.newaxis],#[active_set],
+                                            x_t0[:, np.newaxis][active_set],
+                                            active_set,
+                                            figsize=(30,7),
+                                            title=f'confidence level {(confidence_level*100):.0f}%',
+                                            experiment_dir=os.path.join(experiment_dir, 'CI'),
+                                            filename=f'CI_{round(confidence_level, 2)}',)
 
                                 plot_ci_count_per_confidence_level(
                                     confidence_levels, 
@@ -287,7 +313,7 @@ for estimator in estimators:
                                 plot_proportion_of_hits(
                                     confidence_levels,
                                     CI_count_per_confidence_level,
-                                    x.shape[0],
+                                    x[active_set].shape[0],
                                     experiment_dir=experiment_dir)
                                 
                                 # ------------------------------------------------------
@@ -299,48 +325,48 @@ for estimator in estimators:
 
                                 # ------------------------------------------------------
                                 
-                                # Plot the source estimates
-                                posteroir_var = np.diag(full_posterior_cov)
-                                z_score = x_hat_t0 / (np.sqrt(posteroir_var) + 1e-10)  # mean / std
+                                # # Plot the source estimates
+                                # posteroir_var = np.diag(full_posterior_cov)
+                                # z_score = x_hat_t0 / (np.sqrt(np.abs(posteroir_var)) + 1e-10)  # mean / std #TODO: check this
 
-                                stc_x_t0 = mne.SourceEstimate(x_t0, vertices=vertices, tmin=0, tstep=0)
-                                stc_x_hat_t0 = mne.SourceEstimate(x_hat_t0, vertices=vertices, tmin=0, tstep=0)
-                                stc_variance = mne.SourceEstimate(posteroir_var, vertices=vertices, tmin=0, tstep=0)
-                                stc_zscore = mne.SourceEstimate(z_score, vertices=vertices, tmin=0, tstep=0)
+                                # stc_x_t0 = mne.SourceEstimate(x_t0, vertices=vertices, tmin=0, tstep=0)
+                                # stc_x_hat_t0 = mne.SourceEstimate(x_hat_t0, vertices=vertices, tmin=0, tstep=0)
+                                # stc_variance = mne.SourceEstimate(posteroir_var, vertices=vertices, tmin=0, tstep=0)
+                                # stc_zscore = mne.SourceEstimate(z_score, vertices=vertices, tmin=0, tstep=0)
 
-                                source_estimates = [
-                                    (stc_x_t0, 'Ground Truth'),
-                                    (stc_x_hat_t0, 'Posterior Mean'),
-                                    (stc_variance, 'Posterior Variance'),
-                                    (stc_zscore, 'Z-Score')
-                                ]
+                                # source_estimates = [
+                                #     (stc_x_t0, 'Ground Truth'),
+                                #     (stc_x_hat_t0, 'Posterior Mean'),
+                                #     (stc_variance, 'Posterior Variance'),
+                                #     (stc_zscore, 'Z-Score')
+                                # ]
 
-                                for stc, title in source_estimates:
-                                    brain = stc.plot(hemi="both", subject='fsaverage', subjects_dir=subjects_dir, spacing='ico4', title=title)
+                                # for stc, title in source_estimates:
+                                #     brain = stc.plot(hemi="both", subject='fsaverage', subjects_dir=subjects_dir, spacing='ico4', title=title)
                                     
-                                    for orientation in orientations:
-                                        orientation_dir = os.path.join(experiment_dir, 'brain', orientation)
-                                        os.makedirs(orientation_dir, exist_ok=True)
-                                        brain.show_view(orientation)
-                                        brain.save_image(os.path.join(orientation_dir, f'{title.replace(" ", "_").lower()}_{orientation}.png'))
+                                #     for orientation in orientations:
+                                #         orientation_dir = os.path.join(experiment_dir, 'brain', orientation)
+                                #         os.makedirs(orientation_dir, exist_ok=True)
+                                #         brain.show_view(orientation)
+                                #         brain.save_image(os.path.join(orientation_dir, f'{title.replace(" ", "_").lower()}_{orientation}.png'))
 
-                                    stc_fs = mne.compute_source_morph(
-                                        stc, "sample", "fsaverage", subjects_dir, smooth=5, verbose="error"
-                                    ).apply(stc)
+                                #     stc_fs = mne.compute_source_morph(
+                                #         stc, "sample", "fsaverage", subjects_dir, smooth=5, verbose="error"
+                                #     ).apply(stc)
 
-                                    brain_fs = stc_fs.plot(
-                                        subjects_dir=subjects_dir,
-                                        surface="flat",
-                                        hemi="both",
-                                        size=(1000, 500),
-                                        time_viewer=False,
-                                        add_data_kwargs=dict(colorbar_kwargs=dict(label_font_size=10)),
-                                        title=title,
-                                    )
+                                #     brain_fs = stc_fs.plot(
+                                #         subjects_dir=subjects_dir,
+                                #         surface="flat",
+                                #         hemi="both",
+                                #         size=(1000, 500),
+                                #         time_viewer=False,
+                                #         add_data_kwargs=dict(colorbar_kwargs=dict(label_font_size=10)),
+                                #         title=title,
+                                #     )
                                     
-                                    brain_fs.save_image(os.path.join(experiment_dir, 'brain', f'{title.replace(" ", "_").lower()}_flat.png'))
-                                    brain.close()
-                                    brain_fs.close()
+                                #     brain_fs.save_image(os.path.join(experiment_dir, 'brain', f'{title.replace(" ", "_").lower()}_flat.png'))
+                                #     brain.close()
+                                #     brain_fs.close()
                                 
 print("------------------ Done! ------------------")
                                 

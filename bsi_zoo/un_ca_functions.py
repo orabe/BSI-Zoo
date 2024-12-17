@@ -9,6 +9,10 @@ from bsi_zoo.estimators import Solver, gamma_map
 from bsi_zoo.data_generator import get_data
 from scipy import linalg
 
+from scipy.stats import chi2
+from matplotlib.patches import Ellipse
+from itertools import combinations
+
 # ----- Main Functions -----
 
 def create_directory_structure(base_dir, params):
@@ -39,7 +43,7 @@ def run(
     seeds = rng.randint(low=0, high=2 ** 32, size=nruns)
 
     try:
-        y, L, x, cov, _ = get_data(**data_args, seed=seeds)
+        y, L, x, cov, noise_scaled = get_data(**data_args, seed=seeds)
         n_orient = 3 if data_args["orientation_type"] == "free" else 1
         
         if data_args["cov_type"] == "diag":
@@ -49,7 +53,7 @@ def run(
         
         estimator_ = Solver(
             estimator,
-            alpha=estimator_args["alpha"],
+            alpha=noise_scaled[:, 0], #estimator_args["alpha"],
             cov_type=data_args["cov_type"],
             cov=cov,
             n_orient=n_orient,
@@ -109,7 +113,9 @@ def compute_confidence_intervals(mean, cov, confidence_level=0.95):
     z = z[1]  # For the upper bound of the confidence interval
 
     # Calculate standard deviations from the covariance matrix
-    std_dev = np.sqrt(np.diag(cov))
+    diag_cov = np.diag(cov)
+    # diag_cov = np.abs(diag_cov)  #TODO
+    std_dev = np.sqrt(diag_cov)
 
     # Compute confidence intervals
     if mean.ndim == 1:
@@ -303,3 +309,215 @@ def plot_proportion_of_hits(confidence_levels, CI_count_per_confidence_level, to
     plt.xticks(ticks=confidence_levels, labels=[f'{int(cl*100)}%' for cl in confidence_levels])
     plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))   
     # plt.show()
+  
+    
+    
+    
+    
+    
+    
+# ------------- Confidence Ellipses ------------
+
+
+
+
+
+
+
+
+def plot_sorted_variances(cov, experiment_dir, filename="sorted_variances", top_k=None):
+    """
+    Plot the sorted variances from the covariance matrix.
+
+    Parameters:
+    cov (array): Posterior covariance matrix of shape (n, n).
+    top_k (int, optional): Number of top variances to plot. If None, plots all.
+
+    Returns:
+    None
+    """
+    # Extract variances (diagonal of covariance matrix)
+    variances = np.diag(cov)
+    
+    # Sort variances in descending order
+    sorted_indices = np.argsort(variances)[::-1]
+    sorted_variances = variances[sorted_indices]
+    
+    # Limit to top-k if specified
+    if top_k is not None:
+        sorted_variances = sorted_variances[:top_k]
+        sorted_indices = sorted_indices[:top_k]
+    
+    # Plot the variances
+    plt.figure(figsize=(8, 4))
+    plt.bar(range(len(sorted_variances)), sorted_variances, color='skyblue', edgecolor='blue')
+    plt.xticks(range(len(sorted_variances)), sorted_indices, rotation=45)
+    plt.xlabel("Dimension Index")
+    plt.ylabel("Variance")
+    plt.title(f"Top-{top_k if top_k else len(variances)} Sorted Variances")
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    # plt.show()
+    plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))   
+       
+def compute_top_covariance_pairs(cov, top_k=None):
+    """
+    Compute and optionally sort the magnitudes of covariances for all pairs of dimensions.
+
+    Parameters:
+        cov (array-like): Covariance matrix of shape (n, n).
+        top_k (int, optional): Number of top pairs to return. If None, return all pairs.
+
+    Returns:
+        list: A sorted list of tuples. Each tuple contains:
+              - A pair of indices (i, j).
+              - The absolute magnitude of their covariance.
+    """
+    # Ensure covariance matrix is a NumPy array
+    cov = np.asarray(cov)
+
+    # Get all unique pairs of indices
+    n = cov.shape[0]
+    pairs = list(combinations(range(n), 2))
+
+    # Compute magnitudes of covariances for each pair
+    pair_cov_magnitudes = [(pair, np.abs(cov[pair[0], pair[1]])) for pair in pairs]
+
+    # Sort by covariance magnitude in descending order
+    sorted_pairs = sorted(pair_cov_magnitudes, key=lambda x: x[1], reverse=True)
+
+    # Return top-k pairs if specified
+    if top_k is not None:
+        return sorted_pairs[:top_k]
+    return sorted_pairs
+
+def visualize_sorted_covariances(cov, experiment_dir, filename="sorted_covariances", top_k=None):
+    """
+    Visualize the sorted magnitudes of covariances for all pairs of dimensions.
+
+    Parameters:
+        cov (array-like): Covariance matrix of shape (n, n).
+        top_k (int, optional): Number of top pairs to visualize. If None, visualize all pairs.
+
+    Returns:
+        None
+    """
+    # Compute sorted pairs and magnitudes
+    sorted_pairs = compute_top_covariance_pairs(cov, top_k=top_k)
+    
+    # Extract pairs and magnitudes
+    pairs = [f"({i},{j})" for (i, j), _ in sorted_pairs]
+    magnitudes = [magnitude for _, magnitude in sorted_pairs]
+    
+    # Plot the sor ted magnitudes
+    plt.figure(figsize=(10, 6))
+    plt.bar(pairs, magnitudes, color='skyblue')
+    plt.xlabel('Pairs of Dimensions')
+    plt.ylabel('Covariance Magnitude')
+    plt.title(f"Top-{top_k if top_k else len(magnitudes)} Sorted Covariance Magnitudes")
+
+    plt.xticks(rotation=45, ha='right')
+    plt.tight_layout()
+    # plt.show()
+    plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))   
+    
+    
+
+def compute_confidence_ellipse(mean, cov, confidence_level=0.95):
+    """
+    Compute the parameters of a confidence ellipse for a given mean and covariance matrix.
+    """
+    # Validate covariance matrix
+    condition_number = np.linalg.cond(cov)
+    if condition_number > 1e10:
+        print("Covariance matrix is ill-conditioned")
+    
+    if not np.all(np.linalg.eigvals(cov) > 0):
+        # Regularize covariance matrix if not positive definite
+        epsilon = 1e-6  # Small value to add
+        print("Regularizing covariance matrix...")
+        cov += np.eye(cov.shape[0]) * epsilon
+        # raise ValueError("Covariance matrix is not positive definite.")
+    
+    chi2_val = chi2.ppf(confidence_level, df=2)
+
+    eigenvals, eigenvecs = np.linalg.eigh(cov)
+    
+    if np.all(eigenvals > 0):
+        print("Covariance matrix is now positive definite.")
+    else:
+        print("Covariance matrix is still not positive definite.")
+
+
+    order = np.argsort(eigenvals)[::-1]
+    eigenvals = eigenvals[order]
+    eigenvecs = eigenvecs[:, order]
+
+    width, height = 2 * np.sqrt(eigenvals * chi2_val)
+    angle = np.degrees(np.arctan2(eigenvecs[1, 0], eigenvecs[0, 0]))
+    
+    return width, height, angle
+
+def plot_confidence_ellipse(mean, width, height, angle, ax=None, **kwargs):
+    if ax is None:
+        fig, ax = plt.subplots()
+    
+    ellipse = Ellipse(xy=mean, width=width, height=height, angle=angle, **kwargs)
+    ax.add_patch(ellipse)
+    ax.scatter(*mean, color='blue', label='Mean')
+    ax.set_xlabel("Dimension 1")
+    ax.set_ylabel("Dimension 2")
+    ax.set_title("Confidence Ellipse")
+    ax.grid()
+    ax.legend()
+
+def plot_top_relevant_CE_pairs(mean, cov, experiment_dir, filename="top_relevant_CE_pairs", top_k=5, confidence_level=0.95):
+    """
+    Identify the top-k relevant pairs of dimensions (based on covariance magnitude)
+    and plot their confidence ellipses.
+    """
+    mean = np.asarray(mean)
+    cov = np.asarray(cov)
+
+    n = len(mean)
+    pairs = list(combinations(range(n), 2))
+        
+    # Compute magnitudes of covariances for each pair
+    pair_cov_magnitudes = [(pair, np.abs(cov[pair[0], pair[1]])) for pair in pairs]
+    
+    # Sort by covariance magnitude (descending order)
+    sorted_pairs = sorted(pair_cov_magnitudes, key=lambda x: x[1], reverse=True)
+    top_pairs = [pair for pair, _ in sorted_pairs[:top_k]]
+    
+    # Dynamic grid for subplots
+    n_cols = min(3, top_k)
+    n_rows = (top_k + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 6 * n_rows))
+    axes = axes.flatten()
+
+    # Debug: Print sorted pairs and their covariances
+    for idx, (pair, magnitude) in enumerate(sorted_pairs[:top_k]):
+        print(f"Pair {idx + 1}: Dimensions {pair} | Covariance Magnitude: {magnitude}")
+    
+    # Debug: Print covariance submatrices
+    for idx, (i, j) in enumerate(top_pairs):
+        print(f"Pair {idx + 1}: Dimensions {i, j}")
+        print(f"Covariance submatrix:\n{cov[np.ix_([i, j], [i, j])]}")
+        
+    for idx, (i, j) in enumerate(top_pairs):
+        mean_ij = mean[[i, j]]
+        cov_ij = cov[np.ix_([i, j], [i, j])]
+
+        # Plot confidence ellipse
+        width, height, angle = compute_confidence_ellipse(mean_ij, cov_ij, confidence_level)
+        plot_confidence_ellipse(mean_ij, width, height, angle, ax=axes[idx], edgecolor='blue', alpha=0.5)
+        
+        axes[idx].set_title(f"Dimensions {i} & {j}")
+
+    # Remove unused axes
+    for ax in axes[len(top_pairs):]:
+        fig.delaxes(ax)
+
+    plt.tight_layout()
+    # plt.show()
+    plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))   
