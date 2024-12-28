@@ -19,10 +19,10 @@ def create_directory_structure(base_dir, params):
     experiment_dir = base_dir
     for key, value in params.items():
         experiment_dir = os.path.join(experiment_dir, f"{key}_{value}")
-    if os.path.exists(experiment_dir):
-        print(f"Directory {experiment_dir} already exists. Skipping creation.")
-        return None
-    os.makedirs(experiment_dir)
+    # if os.path.exists(experiment_dir):
+        # print(f"Directory {experiment_dir} already exists. Skipping creation.")
+        # return None
+    os.makedirs(experiment_dir, exist_ok=True)
     return experiment_dir
 
 def run(
@@ -53,7 +53,7 @@ def run(
         
         estimator_ = Solver(
             estimator,
-            alpha=noise_scaled[:, 0], #estimator_args["alpha"],
+            alpha=estimator_args["alpha"],
             cov_type=data_args["cov_type"],
             cov=cov,
             n_orient=n_orient,
@@ -324,14 +324,13 @@ def plot_proportion_of_hits(confidence_levels, CI_count_per_confidence_level, to
 
 
 
-
 def plot_sorted_variances(cov, experiment_dir, filename="sorted_variances", top_k=None):
     """
-    Plot the sorted variances from the covariance matrix.
+    Plot the sorted variances from the covariance matrix, highlighting the top-k variances.
 
     Parameters:
     cov (array): Posterior covariance matrix of shape (n, n).
-    top_k (int, optional): Number of top variances to plot. If None, plots all.
+    top_k (int, optional): Number of top variances to highlight. If None, highlights all.
 
     Returns:
     None
@@ -343,18 +342,19 @@ def plot_sorted_variances(cov, experiment_dir, filename="sorted_variances", top_
     sorted_indices = np.argsort(variances)[::-1]
     sorted_variances = variances[sorted_indices]
     
-    # Limit to top-k if specified
-    if top_k is not None:
-        sorted_variances = sorted_variances[:top_k]
-        sorted_indices = sorted_indices[:top_k]
-    
     # Plot the variances
-    plt.figure(figsize=(8, 4))
-    plt.bar(range(len(sorted_variances)), sorted_variances, color='skyblue', edgecolor='blue')
+    plt.figure(figsize=(12, 6))
+    bars = plt.bar(range(len(sorted_variances)), sorted_variances, color='skyblue', edgecolor='blue')
+    
+    # Highlight top-k variances if specified
+    if top_k is not None:
+        for bar in bars[:top_k]:
+            bar.set_color('orange')
+    
     plt.xticks(range(len(sorted_variances)), sorted_indices, rotation=45)
-    plt.xlabel("Dimension Index")
+    plt.xlabel("Source Index")
     plt.ylabel("Variance")
-    plt.title(f"Top-{top_k if top_k else len(variances)} Sorted Variances")
+    plt.title(f"Sorted Posterior Variances (Top-{top_k if top_k else len(variances)} Highlighted)")
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()
     # plt.show()
@@ -421,7 +421,16 @@ def visualize_sorted_covariances(cov, experiment_dir, filename="sorted_covarianc
     # plt.show()
     plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))   
     
-    
+
+def make_psd(cov, epsilon=1e-6):
+    """
+    Ensure that the covariance matrix is positive semi-definite by adding epsilon to the diagonal.
+    """
+    print("Regularizing covariance matrix...")
+    while not np.all(np.linalg.eigvals(cov) >= 0):
+        cov += np.eye(cov.shape[0]) * epsilon
+        epsilon *= 10  # Gradually increase epsilon if needed
+    return cov
 
 def compute_confidence_ellipse(mean, cov, confidence_level=0.95):
     """
@@ -432,12 +441,9 @@ def compute_confidence_ellipse(mean, cov, confidence_level=0.95):
     if condition_number > 1e10:
         print("Covariance matrix is ill-conditioned")
     
+    # Regularize covariance matrix if not positive definite by adding gradually increasing epsilon to the diagonal.
     if not np.all(np.linalg.eigvals(cov) > 0):
-        # Regularize covariance matrix if not positive definite
-        epsilon = 1e-6  # Small value to add
-        print("Regularizing covariance matrix...")
-        cov += np.eye(cov.shape[0]) * epsilon
-        # raise ValueError("Covariance matrix is not positive definite.")
+        cov = make_psd(cov, epsilon=1e-6)
     
     chi2_val = chi2.ppf(confidence_level, df=2)
 
@@ -448,7 +454,6 @@ def compute_confidence_ellipse(mean, cov, confidence_level=0.95):
     else:
         print("Covariance matrix is still not positive definite.")
 
-
     order = np.argsort(eigenvals)[::-1]
     eigenvals = eigenvals[order]
     eigenvecs = eigenvecs[:, order]
@@ -456,20 +461,52 @@ def compute_confidence_ellipse(mean, cov, confidence_level=0.95):
     width, height = 2 * np.sqrt(eigenvals * chi2_val)
     angle = np.degrees(np.arctan2(eigenvecs[1, 0], eigenvecs[0, 0]))
     
+    # TODO: replace nan values with small values to enable plotting
+    # if np.isnan(width):
+    #     width = 1e-6 
+    #     print("Warning: Replacing NaN width with a small value.")
+    
+    # if np.isnan(height):
+    #     height = 1e-6 
+    #     print("Warning: Replacing NaN height with a small value.")
+        
     return width, height, angle
 
+
 def plot_confidence_ellipse(mean, width, height, angle, ax=None, **kwargs):
+    """
+    Plot a confidence ellipse for given parameters.
+
+    Parameters:
+    - mean: array-like, shape (2,)
+        The mean of the data in the two dimensions being plotted.
+    - width: float
+        The width of the ellipse (related to variance along the major axis).
+    - height: float
+        The height of the ellipse (related to variance along the minor axis).
+    - angle: float
+        The rotation angle of the ellipse in degrees.
+    - ax: matplotlib.axes.Axes, optional
+        The axis on which to plot the ellipse. If None, creates a new figure.
+    - **kwargs: additional keyword arguments for matplotlib.patches.Ellipse.
+    """
     if ax is None:
         fig, ax = plt.subplots()
-    
+
+    # Add ellipse patch
     ellipse = Ellipse(xy=mean, width=width, height=height, angle=angle, **kwargs)
     ax.add_patch(ellipse)
     ax.scatter(*mean, color='blue', label='Mean')
-    ax.set_xlabel("Dimension 1")
-    ax.set_ylabel("Dimension 2")
-    ax.set_title("Confidence Ellipse")
+    
+    # Set axis labels
+    ax.set_xlabel("Principal Component 1 (Variance in Dim 1)")
+    ax.set_ylabel("Principal Component 2 (Variance in Dim 2)")
+
+    # Set title
+    ax.set_title("Confidence Ellipse (Width and Height Indicate Variance)")
     ax.grid()
     ax.legend()
+    
 
 def plot_top_relevant_CE_pairs(mean, cov, experiment_dir, filename="top_relevant_CE_pairs", top_k=5, confidence_level=0.95):
     """
@@ -518,6 +555,7 @@ def plot_top_relevant_CE_pairs(mean, cov, experiment_dir, filename="top_relevant
     for ax in axes[len(top_pairs):]:
         fig.delaxes(ax)
 
+    fig.suptitle("Top Relevant Dimensional Pairs with Confidence Ellipses", fontsize=16)
     plt.tight_layout()
     # plt.show()
     plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))   

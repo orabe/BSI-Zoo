@@ -24,9 +24,9 @@ cov = np.random.randn(10, 10)
 cov = np.dot(cov, cov.T)
 
 top_k = 5
-plot_sorted_variances(cov, "experiment_results", top_k=top_k)
-visualize_sorted_covariances(cov, "experiment_results", top_k=top_k)
-plot_top_relevant_CE_pairs(mean, cov, "experiment_results", top_k=5, confidence_level=0.95)
+# plot_sorted_variances(cov, "experiment_results", top_k=top_k)
+# visualize_sorted_covariances(cov, "experiment_results", top_k=top_k)
+# plot_top_relevant_CE_pairs(mean, cov, "experiment_results", top_k=5, confidence_level=0.95)
 
 
 # load src space
@@ -137,24 +137,25 @@ base_dir = "experiment_results"
 
 estimators = [gamma_map]
 orientation_types = ["fixed"]
-cov_types = ["full"]
-alpha_snrs = [0.8]
-nnzs = [5]
+cov_types = ["diag"]
+noise_types = ["scaled_identity"]
+alpha_snrs = [0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.99]
+nnzs = [1, 3, 5, 10, 20]
 n_times = 2
-estimator_alphas = [0] # np.logspace(0, -2, 10)[1:]
+estimator_alphas = [None] # np.logspace(0, -2, 10)[1:]
 estimator_args = {"alpha": estimator_alphas}
 estimator_extra_params = {
     "update_mode": 2,
     "max_iter": 1000,
     "tol": 1e-15,
     "gammas": {
-        # "fixed": {
-        #     "value": 0.001
-        # },
-        # "random_uniform": {
-        #     "low": 0.001,
-        #     "high": 0.1
-        # },
+        "fixed": {
+            "value": 0.001
+        },
+        "random_uniform": {
+            "low": 0.001,
+            "high": 0.1
+        },
         "ones": {
             "value": 1.0
         }
@@ -171,202 +172,207 @@ for estimator in estimators:
         for orientation_type in orientation_types:
             for nnz in nnzs:
                 for cov_type in cov_types:
-                    for sigma_squared in estimator_args["alpha"]:
-                        for alpha_snr in alpha_snrs:
-                            
-                            # print(f"nnz: {nnz}, alpha: {sigma_squared}, alpha_snr: {alpha_snr}")
-                            
-                            for gamma_init_method, value in estimator_extra_params_copy['gammas'].items():
-                                if gamma_init_method == "fixed":
-                                    estimator_extra_params['gammas'] = np.full((L.shape[1],), value['value'], dtype=np.float64)
+                    for noise_type in noise_types:
+                        for sigma_squared in estimator_args["alpha"]:
+                            for alpha_snr in alpha_snrs:
+                                
+                                # print(f"nnz: {nnz}, alpha: {sigma_squared}, alpha_snr: {alpha_snr}")
+                                
+                                for gamma_init_method, value in estimator_extra_params_copy['gammas'].items():
+                                    if gamma_init_method == "fixed":
+                                        estimator_extra_params['gammas'] = np.full((L.shape[1],), value['value'], dtype=np.float64)
+                                        
+                                    elif gamma_init_method == "random_uniform":
+                                        rng = check_random_state(random_state)
+                                        estimator_extra_params['gammas'] = rng.uniform(low=value['low'], high=value['high'], size=(L.shape[1],))
+                                        
+                                    elif gamma_init_method == "ones":
+                                        estimator_extra_params['gammas'] = np.ones((L.shape[1],), dtype=np.float64)
                                     
-                                elif gamma_init_method == "random_uniform":
-                                    rng = check_random_state(random_state)
-                                    estimator_extra_params['gammas'] = rng.uniform(low=value['low'], high=value['high'], size=(L.shape[1],))
+                                    else:
+                                        raise ValueError(f"Unknown gamma initialization method: {gamma_init_method}")
                                     
-                                elif gamma_init_method == "ones":
-                                    estimator_extra_params['gammas'] = np.ones((L.shape[1],), dtype=np.float64)
-                                
-                                else:
-                                    raise ValueError(f"Unknown gamma initialization method: {gamma_init_method}")
-                                
-                                
-                                # ------------------------------------------------------
-                                
-                                
-                                # Define the hyperparameters
-                                hyperparameters = {
-                                    "estimator": estimator.__name__,
-                                    "spatial_cv": spatial_cv,
-                                    "orientation_type": orientation_type,
-                                    "cov_type": cov_type,
-                                    "n_times": 1,
-                                    "nnz": nnz,
-                                    "sigma_squared": round(sigma_squared, 2),
-                                    "alpha_snr": alpha_snr,
-                                    "gamma_init": gamma_init_method,
-                                }
+                                    
+                                    # ------------------------------------------------------
+                                    
+                                    data_args_II = {
+                                        "n_times": n_times,
+                                        "nnz": nnz,
+                                        "cov_type": cov_type, # or 'diag'
+                                        "noise_type": noise_type, # or 'random'
+                                        "path_to_leadfield": path_to_leadfield,
+                                        "orientation_type": orientation_type,
+                                        "alpha": alpha_snr, 
+                                    }
+                                    
 
-                                experiment_dir = create_directory_structure(base_dir, hyperparameters)
-                                
-                                if experiment_dir is None:
-                                    print("Hyperparameters already exist. Skipping...")
-                                    continue  
+                                    
+                                    results = dict(estimator=estimator.__name__) 
+                                    x, x_hat, y, L, cov, active_set, posterior_cov, results = run(
+                                        estimator=estimator,
+                                        subject=subject,
+                                        metrics=metrics,
+                                        data_args=data_args_II,
+                                        estimator_args={"alpha":sigma_squared},
+                                        random_state=random_state,
+                                        memory=memory,
+                                        n_jobs=n_jobs,
+                                        do_spatial_cv=spatial_cv, 
+                                        estimator_extra_params=estimator_extra_params,
+                                        results=results,
+                                        nruns=nruns
+                                    )
+                                    
+                                    print(f"------------------ Done {estimator.__name__}! ------------------")
+
+                                    x_t0 = x[:, 0]
+                                    x_hat_t0 = x_hat[:, 0]
+                                    
+                                    # Create a full covariance matrix with zeros
+                                    full_posterior_cov = np.zeros((x_hat.shape[0], x_hat.shape[0]))
+
+                                    # Fill in the active set covariance values
+                                    for i, idx_i in enumerate(active_set):
+                                        for j, idx_j in enumerate(active_set):
+                                            full_posterior_cov[idx_i, idx_j] = posterior_cov[i, j]
+
+                                    # Test the shape of the full posterior covariance matrix
+                                    non_zero_values = full_posterior_cov[full_posterior_cov != 0]
+                                    assert non_zero_values.size == posterior_cov.size == active_set.size ** 2
+                                    
+                                    
+                                    # --------------------------------------------------
+                                    # Define the hyperparameters
+                                    hyperparameters = {
+                                        "estimator": estimator.__name__,
+                                        "n_times": 1,
+                                        "nnz": nnz,
+                                        "spatial_cv": spatial_cv,
+                                        "orientation_type": orientation_type,
+                                        "cov_type": cov_type,
+                                        "noise_type": noise_type,
+                                        "sigma_squared": np.round(np.diag(cov)[0], 2),
+                                        "alpha_snr": alpha_snr,
+                                        "gamma_init": gamma_init_method,
+                                    }
                                                             
-                                data_args_II = {
-                                    "n_times": n_times,
-                                    "nnz": nnz,
-                                    "cov_type": cov_type, # or 'diag'
-                                    "path_to_leadfield": path_to_leadfield,
-                                    "orientation_type": orientation_type,
-                                    "alpha": alpha_snr, 
-                                }
-                                
-                                
-                                results = dict(estimator=estimator.__name__) 
-                                x, x_hat, y, L, cov, active_set, posterior_cov, results = run(
-                                    estimator=estimator,
-                                    subject=subject,
-                                    metrics=metrics,
-                                    data_args=data_args_II,
-                                    estimator_args={"alpha":sigma_squared},
-                                    random_state=random_state,
-                                    memory=memory,
-                                    n_jobs=n_jobs,
-                                    do_spatial_cv=spatial_cv, 
-                                    estimator_extra_params=estimator_extra_params,
-                                    results=results,
-                                    nruns=nruns
-                                )
-                                
-                                print("------------------ Done! ------------------")
+                                    experiment_dir = create_directory_structure(base_dir, hyperparameters)
 
-                                x_t0 = x[:, 0]
-                                x_hat_t0 = x_hat[:, 0]
-                                
-                                # Create a full covariance matrix with zeros
-                                full_posterior_cov = np.zeros((x_hat.shape[0], x_hat.shape[0]))
-
-                                # Fill in the active set covariance values
-                                for i, idx_i in enumerate(active_set):
-                                    for j, idx_j in enumerate(active_set):
-                                        full_posterior_cov[idx_i, idx_j] = posterior_cov[i, j]
-
-                                # Test the shape of the full posterior covariance matrix
-                                non_zero_values = full_posterior_cov[full_posterior_cov != 0]
-                                assert non_zero_values.size == posterior_cov.size == active_set.size ** 2
-                                
-                                
-                                # ------------------------------------------------------
-                                # Vizualise Confidence Ellipses
-                                top_k = 5
-                                plot_sorted_variances(posterior_cov, experiment_dir, top_k=top_k)
-                                visualize_sorted_covariances(posterior_cov, experiment_dir, top_k=top_k)
-                                plot_top_relevant_CE_pairs(x_hat_t0[active_set], posterior_cov, experiment_dir, top_k=5, confidence_level=0.95)
-
-                                
-                                # ------------------------------------------------------
-                                
-                                plot_active_sources_single_time_step(x, x_hat, active_set, time_step=0, experiment_dir=experiment_dir)
-                                
-                                plot_posterior_covariance_matrix(posterior_cov, experiment_dir)
-                                
-                                # ------------------------------------------------------
-                                                                
-
-                                confidence_levels = np.linspace(0.1, 0.99, 10)
-                                CI_count_per_confidence_level = []
-                                if not os.path.exists(os.path.join(experiment_dir, 'CI')):
-                                    os.makedirs(os.path.join(experiment_dir, 'CI'))
-                                
-                                    for confidence_level in confidence_levels:    
-                                        # ci_lower, ci_upper = compute_confidence_intervals(
-                                        #     x_hat_t0, full_posterior_cov, confidence_level
-                                        # )
-                                        
-                                        ci_lower, ci_upper = compute_confidence_intervals(
-                                            x_hat_t0[active_set], posterior_cov, confidence_level
-                                        )
-                                        
-                                        count_within_ci = count_values_within_ci(x_t0[active_set], ci_lower, ci_upper)
-                                        
-                                        print(f"Confidence lvl: {confidence_level:.2f}, Count Within CI: {count_within_ci}")
-                                        CI_count_per_confidence_level.append(count_within_ci)
-
-                                        plot_ci_times(
-                                            x_hat_t0[:, np.newaxis][active_set],
-                                            ci_lower[:, np.newaxis],#[active_set],
-                                            ci_upper[:, np.newaxis],#[active_set],
-                                            x_t0[:, np.newaxis][active_set],
-                                            active_set,
-                                            figsize=(30,7),
-                                            title=f'confidence level {(confidence_level*100):.0f}%',
-                                            experiment_dir=os.path.join(experiment_dir, 'CI'),
-                                            filename=f'CI_{round(confidence_level, 2)}',)
-
-                                plot_ci_count_per_confidence_level(
-                                    confidence_levels, 
-                                    CI_count_per_confidence_level,
-                                    active_set.shape[0],
-                                    experiment_dir=experiment_dir)
-
-                                plot_proportion_of_hits(
-                                    confidence_levels,
-                                    CI_count_per_confidence_level,
-                                    x[active_set].shape[0],
-                                    experiment_dir=experiment_dir)
-                                
-                                # ------------------------------------------------------
-
-                                # Ensure the number of vertices matches the data
-                                n_sources = sum(len(v) for v in vertices)
-                                if x.shape[0] != n_sources:
-                                    raise ValueError(f"Data has {x.shape[0]} sources, but source space has {n_sources} sources!")
-
-                                # ------------------------------------------------------
-                                
-                                # # Plot the source estimates
-                                # posteroir_var = np.diag(full_posterior_cov)
-                                # z_score = x_hat_t0 / (np.sqrt(np.abs(posteroir_var)) + 1e-10)  # mean / std #TODO: check this
-
-                                # stc_x_t0 = mne.SourceEstimate(x_t0, vertices=vertices, tmin=0, tstep=0)
-                                # stc_x_hat_t0 = mne.SourceEstimate(x_hat_t0, vertices=vertices, tmin=0, tstep=0)
-                                # stc_variance = mne.SourceEstimate(posteroir_var, vertices=vertices, tmin=0, tstep=0)
-                                # stc_zscore = mne.SourceEstimate(z_score, vertices=vertices, tmin=0, tstep=0)
-
-                                # source_estimates = [
-                                #     (stc_x_t0, 'Ground Truth'),
-                                #     (stc_x_hat_t0, 'Posterior Mean'),
-                                #     (stc_variance, 'Posterior Variance'),
-                                #     (stc_zscore, 'Z-Score')
-                                # ]
-
-                                # for stc, title in source_estimates:
-                                #     brain = stc.plot(hemi="both", subject='fsaverage', subjects_dir=subjects_dir, spacing='ico4', title=title)
+                                    # if experiment_dir is None:
+                                    #     print("Hyperparameters already exist. Skipping...")
+                                    #     continue  
+                                    # --------------------------------------------------
                                     
-                                #     for orientation in orientations:
-                                #         orientation_dir = os.path.join(experiment_dir, 'brain', orientation)
-                                #         os.makedirs(orientation_dir, exist_ok=True)
-                                #         brain.show_view(orientation)
-                                #         brain.save_image(os.path.join(orientation_dir, f'{title.replace(" ", "_").lower()}_{orientation}.png'))
+                                    # Vizualise Confidence Ellipses
+                                    top_k = 5
+                                    plot_sorted_variances(posterior_cov, experiment_dir, top_k=top_k)
+                                    visualize_sorted_covariances(posterior_cov, experiment_dir, top_k=top_k)
+                                    plot_top_relevant_CE_pairs(x_hat_t0[active_set], posterior_cov, experiment_dir, top_k=5, confidence_level=0.95)
 
-                                #     stc_fs = mne.compute_source_morph(
-                                #         stc, "sample", "fsaverage", subjects_dir, smooth=5, verbose="error"
-                                #     ).apply(stc)
-
-                                #     brain_fs = stc_fs.plot(
-                                #         subjects_dir=subjects_dir,
-                                #         surface="flat",
-                                #         hemi="both",
-                                #         size=(1000, 500),
-                                #         time_viewer=False,
-                                #         add_data_kwargs=dict(colorbar_kwargs=dict(label_font_size=10)),
-                                #         title=title,
-                                #     )
                                     
-                                #     brain_fs.save_image(os.path.join(experiment_dir, 'brain', f'{title.replace(" ", "_").lower()}_flat.png'))
-                                #     brain.close()
-                                #     brain_fs.close()
+                                    # --------------------------------------------------
+                                    
+                                    plot_active_sources_single_time_step(x, x_hat, active_set, time_step=0, experiment_dir=experiment_dir)
+                                    
+                                    plot_posterior_covariance_matrix(posterior_cov, experiment_dir)
+                                    
+                                    # --------------------------------------------------
+                                                                    
+
+                                    confidence_levels = np.linspace(0.1, 0.99, 10)
+                                    CI_count_per_confidence_level = []
+                                    # if not os.path.exists(os.path.join(experiment_dir, 'CI')):
+                                    if True:
+                                        os.makedirs(os.path.join(experiment_dir, 'CI'), exist_ok=True)
+                                    
+                                        for confidence_level in confidence_levels:    
+                                            # ci_lower, ci_upper = compute_confidence_intervals(
+                                            #     x_hat_t0, full_posterior_cov, confidence_level
+                                            # )
+                                            
+                                            ci_lower, ci_upper = compute_confidence_intervals(
+                                                x_hat_t0[active_set], posterior_cov, confidence_level
+                                            )
+                                            
+                                            count_within_ci = count_values_within_ci(x_t0[active_set], ci_lower, ci_upper)
+                                            
+                                            print(f"Confidence lvl: {confidence_level:.2f}, Count Within CI: {count_within_ci}")
+                                            CI_count_per_confidence_level.append(count_within_ci)
+
+                                            plot_ci_times(
+                                                x_hat_t0[:, np.newaxis][active_set],
+                                                ci_lower[:, np.newaxis],#[active_set],
+                                                ci_upper[:, np.newaxis],#[active_set],
+                                                x_t0[:, np.newaxis][active_set],
+                                                active_set,
+                                                figsize=(30,7),
+                                                title=f'confidence level {(confidence_level*100):.0f}%',
+                                                experiment_dir=os.path.join(experiment_dir, 'CI'),
+                                                filename=f'CI_{round(confidence_level, 2)}',)
+
+                                    plot_ci_count_per_confidence_level(
+                                        confidence_levels, 
+                                        CI_count_per_confidence_level,
+                                        active_set.shape[0],
+                                        experiment_dir=experiment_dir)
+
+                                    plot_proportion_of_hits(
+                                        confidence_levels,
+                                        CI_count_per_confidence_level,
+                                        x[active_set].shape[0],
+                                        experiment_dir=experiment_dir)
+                                    
+                                    # --------------------------------------------------
+
+                                    # Ensure the number of vertices matches the data
+                                    n_sources = sum(len(v) for v in vertices)
+                                    if x.shape[0] != n_sources:
+                                        raise ValueError(f"Data has {x.shape[0]} sources, but source space has {n_sources} sources!")
+
+                                    # --------------------------------------------------
+                                    
+                                    # # Plot the source estimates
+                                    # posteroir_var = np.diag(full_posterior_cov)
+                                    # z_score = x_hat_t0 / (np.sqrt(np.abs(posteroir_var)) + 1e-10)  # mean / std #TODO: check this
+
+                                    # stc_x_t0 = mne.SourceEstimate(x_t0, vertices=vertices, tmin=0, tstep=0)
+                                    # stc_x_hat_t0 = mne.SourceEstimate(x_hat_t0, vertices=vertices, tmin=0, tstep=0)
+                                    # stc_variance = mne.SourceEstimate(posteroir_var, vertices=vertices, tmin=0, tstep=0)
+                                    # stc_zscore = mne.SourceEstimate(z_score, vertices=vertices, tmin=0, tstep=0)
+
+                                    # source_estimates = [
+                                    #     (stc_x_t0, 'Ground Truth'),
+                                    #     (stc_x_hat_t0, 'Posterior Mean'),
+                                    #     (stc_variance, 'Posterior Variance'),
+                                    #     (stc_zscore, 'Z-Score')
+                                    # ]
+
+                                    # for stc, title in source_estimates:
+                                    #     brain = stc.plot(hemi="both", subject='fsaverage', subjects_dir=subjects_dir, spacing='ico4', title=title)
+                                        
+                                    #     for orientation in orientations:
+                                    #         orientation_dir = os.path.join(experiment_dir, 'brain', orientation)
+                                    #         os.makedirs(orientation_dir, exist_ok=True)
+                                    #         brain.show_view(orientation)
+                                    #         brain.save_image(os.path.join(orientation_dir, f'{title.replace(" ", "_").lower()}_{orientation}.png'))
+
+                                    #     stc_fs = mne.compute_source_morph(
+                                    #         stc, "sample", "fsaverage", subjects_dir, smooth=5, verbose="error"
+                                    #     ).apply(stc)
+
+                                    #     brain_fs = stc_fs.plot(
+                                    #         subjects_dir=subjects_dir,
+                                    #         surface="flat",
+                                    #         hemi="both",
+                                    #         size=(1000, 500),
+                                    #         time_viewer=False,
+                                    #         add_data_kwargs=dict(colorbar_kwargs=dict(label_font_size=10)),
+                                    #         title=title,
+                                    #     )
+                                        
+                                    #     brain_fs.save_image(os.path.join(experiment_dir, 'brain', f'{title.replace(" ", "_").lower()}_flat.png'))
+                                    #     brain.close()
+                                    #     brain_fs.close()
                                 
 print("------------------ Done! ------------------")
                                 
