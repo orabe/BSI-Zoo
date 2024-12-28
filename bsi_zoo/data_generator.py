@@ -2,15 +2,14 @@ import numpy as np
 from scipy.stats import wishart
 
 
-def _add_noise(cov_type, y, alpha, rng, n_sensors, n_times):
-    noise_type = "random"
+def _add_noise(cov_type, y, alpha, rng, n_sensors, n_times, noise_type="random"):
     if cov_type == "diag":
         if noise_type == "random":
             # initialization of the noise covariance matrix with a random diagonal matrix
             rv = wishart(df=n_sensors, scale=1e-3 * np.eye(n_sensors))
             cov = rv.rvs()
             cov = np.diag(np.diag(cov))
-        else:
+        elif noise_type == "scaled_identity":
             # initialization of the noise covariance with an identity matrix
             cov = 1e-2 * np.diag(np.ones(n_sensors))
     else:
@@ -27,11 +26,13 @@ def _add_noise(cov_type, y, alpha, rng, n_sensors, n_times):
     cov_scaled = cov * (((1 - alpha) / alpha) * (signal_norm / noise_norm)) ** 2
     y += noise_scaled
 
-    return y, cov_scaled, noise_scaled
+    #TODO: return cov instead of cov_scaled for the moment!
+    return y, cov, noise_scaled
 
 
 def get_data(
     cov_type,
+    noise_type,
     path_to_leadfield,
     n_sensors=50,
     n_times=10,
@@ -70,7 +71,7 @@ def get_data(
 
     # add noise
     y, cov_scaled, noise_scaled = _add_noise(
-        cov_type, y, alpha, rng, n_sensors, n_times
+        cov_type, y, alpha, rng, n_sensors, n_times, noise_type
     )
 
     if orientation_type == "free":
