@@ -433,6 +433,7 @@ class Solver(BaseEstimator, ClassifierMixin):
             coef = self.solver(
                 self.L_,
                 y,
+                cov=self.cov,
                 alpha=self.alpha,
                 n_orient=self.n_orient,
                 **self.extra_params
@@ -934,7 +935,7 @@ def gamma_map(
     L,
     y,
     cov=1.0,
-    alpha=0.2,
+    alpha=None,
     n_orient=1,
     max_iter=1000,
     tol=1e-15,
@@ -944,7 +945,12 @@ def gamma_map(
     verbose=True,
 ):
     if isinstance(cov, float):
+        alpha = 0.2
         cov = alpha * np.eye(L.shape[0])
+    
+    if alpha is None:
+        alpha = np.diag(cov)[0] # alpha: noise variance = diagonal of the covariance matrix, where all diagonal elements are equal.
+        
     # Take care of whitening
     whitener = linalg.inv(linalg.sqrtm(cov))
     y = whitener @ y
