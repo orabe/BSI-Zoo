@@ -106,223 +106,525 @@ def eval(
     results.update({f"estimator__{k}": v for k, v in estimator_args.items()})
     return results
 
-def compute_confidence_intervals(mean, cov, confidence_level=0.95):
+def compute_confidence_intervals(
+    mean: np.ndarray, 
+    cov: np.ndarray, 
+    orientation_type: str = "fixed", 
+    confidence_level: float = 0.95
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Compute confidence intervals for a given mean and covariance matrix.
+
+    Parameters:
+    ===========
+    mean (np.ndarray): The mean values. Can be a 1D or 2D array.
+    cov (np.ndarray): The covariance matrix.
+    orientation_type (str, optional): The type of orientation. Can be "fixed" or "free". Default is "fixed".
+    confidence_level (float, optional): The confidence level for the intervals. 
+                                        Default is 0.95.
+
+    Returns:
+    ========
+    tuple: A tuple containing two numpy arrays:
+        - ci_lower (np.ndarray): The lower bounds of the confidence intervals.
+        - ci_upper (np.ndarray): The upper bounds of the confidence intervals.
+
+    Raises:
+    =======
+    ValueError: If the mean array has unsupported number of dimensions.
+    ValueError: If the orientation type is unsupported.
+
+    Notes:
+    ======
+    - For "fixed" orientation type, the function calculates the confidence intervals 
+        directly from the mean and the diagonal of the covariance matrix.
+    - For "free" orientation type, the function iterates over the orientations (X, Y, Z) and calculates the confidence intervals for each orientation separately.
+    - The Z-score is computed based on the given confidence level using a normal distribution.
+    """
     # Z-score for the given confidence level
     z = np.abs(np.percentile(np.random.normal(0, 1, 1000000),
-                             [(1 - confidence_level) / 2 * 100, (1 + confidence_level) / 2 * 100]))
+                                [(1 - confidence_level) / 2 * 100, (1 + confidence_level) / 2 * 100]))
     z = z[1]  # For the upper bound of the confidence interval
 
-    # Calculate standard deviations from the covariance matrix
-    diag_cov = np.diag(cov)
-    # diag_cov = np.abs(diag_cov)  #TODO
-    std_dev = np.sqrt(diag_cov)
+    if orientation_type == "fixed":
+        # Calculate standard deviations from the covariance matrix
+        diag_cov = np.diag(cov)
+        std_dev = np.sqrt(diag_cov)
 
-    # Compute confidence intervals
-    if mean.ndim == 1:
-        ci_lower = mean - z * std_dev
-        ci_upper = mean + z * std_dev
-    elif mean.ndim == 2:
-        ci_lower = mean - z * std_dev[:, np.newaxis]
-        ci_upper = mean + z * std_dev[:, np.newaxis]
+        # Compute confidence intervals
+        if mean.ndim == 1:
+            ci_lower = mean - z * std_dev
+            ci_upper = mean + z * std_dev
+        elif mean.ndim == 2:
+            ci_lower = mean - z * std_dev[:, np.newaxis]
+            ci_upper = mean + z * std_dev[:, np.newaxis]
+        else:
+            raise ValueError("Mean array has unsupported number of dimensions")
+    elif orientation_type == "free":
+        n_sources = mean.shape[0] // 3
+        ci_lower = np.zeros_like(mean)
+        ci_upper = np.zeros_like(mean)
+
+        for i in range(3):  # Iterate over orientations X, Y, Z
+            mean_orient = mean[i::3]
+            diag_cov_orient = np.diag(cov[i::3, i::3])
+            std_dev_orient = np.sqrt(diag_cov_orient)
+
+            if mean_orient.ndim == 1:
+                ci_lower[i::3] = mean_orient - z * std_dev_orient
+                ci_upper[i::3] = mean_orient + z * std_dev_orient
+            elif mean_orient.ndim == 2:
+                ci_lower[i::3] = mean_orient - z * std_dev_orient[:, np.newaxis]
+                ci_upper[i::3] = mean_orient + z * std_dev_orient[:, np.newaxis]
+            else:
+                raise ValueError("Mean array has unsupported number of dimensions")
     else:
-        raise ValueError("Mean array has unsupported number of dimensions")
+        raise ValueError("Unsupported orientation type")
 
     return ci_lower, ci_upper
 
-def count_values_within_ci(x, ci_lower, ci_upper):
+
+def count_values_within_ci(
+    x: np.ndarray, 
+    ci_lower: np.ndarray, 
+    ci_upper: np.ndarray, 
+    orientation_type: str = "fixed"
+) -> int:
     """
     Count the number of ground truth values that lie within the confidence intervals.
 
     Parameters:
-    x (np.ndarray): The ground truth source activities, shape (n_sources, n_times).
-    ci_lower (np.ndarray): The lower bounds of the confidence intervals, shape (n_sources, n_times).
-    ci_upper (np.ndarray): The upper bounds of the confidence intervals, shape (n_sources, n_times).
+    ===========
+    x (np.ndarray): The ground truth source activities, shape (n_sources,) or (n_sources, n_times).
+    ci_lower (np.ndarray): The lower bounds of the confidence intervals, shape (n_sources,) or (n_sources, n_times).
+    ci_upper (np.ndarray): The upper bounds of the confidence intervals, shape (n_sources,) or (n_sources, n_times).
+    orientation_type (str, optional): The type of orientation. Can be "fixed" or "free". Default is "fixed".
 
     Returns:
+    ========
     int: The count of ground truth values within the confidence intervals.
+
+    Raises:
+    =======
+    ValueError: If the orientation type is unsupported.
+
+    Notes:
+    ======
+    - For "fixed" orientation type, the function counts the values directly from the mean and the diagonal of the covariance matrix.
+    - For "free" orientation type, the function iterates over the orientations (X, Y, Z) and counts the values for each orientation separately.
     """
-    if x.ndim == 1:
-        count_within_ci = np.sum((x >= ci_lower) & (x <= ci_upper))
+    if orientation_type == "fixed":
+        if x.ndim == 1:
+            count_within_ci = np.sum((x >= ci_lower) & (x <= ci_upper))
+        else:
+            count_within_ci = np.sum((x >= ci_lower) & (x <= ci_upper), axis=0)
+    
+    elif orientation_type == "free":
+        count_within_ci = np.zeros(3)
+        if x.ndim == 1:
+            for i in range(3):  # Iterate over orientations X, Y, Z
+                x_orient = x[i::3]
+                ci_lower_orient = ci_lower[i::3]
+                ci_upper_orient = ci_upper[i::3]
+                count_within_ci[i] = np.sum((x_orient >= ci_lower_orient) &
+                                            (x_orient <= ci_upper_orient))
+        else:
+            for i in range(3):  # Iterate over orientations X, Y, Z
+                x_orient = x[i::3, :]
+                ci_lower_orient = ci_lower[i::3, :]
+                ci_upper_orient = ci_upper[i::3, :]
+                count_within_ci[i] = np.sum((x_orient >= ci_lower_orient) &
+                                            (x_orient <= ci_upper_orient), axis=0)
     else:
-        count_within_ci = np.zeros(x.ndim)
-        for i in range(x.ndim):
-            count_within_ci[i] = np.sum((x[:, i] >= ci_lower[:, i]) &
-                                        (x[:, i] <= ci_upper[:, i]))
+        raise ValueError("Unsupported orientation type")
+
     return count_within_ci
 
 # ----- Visualization Functions -----
-def plot_ci_count_per_confidence_level(confidence_levels, CI_count_per_confidence_level, active_set_size, experiment_dir=None, filename='ci_count_per_confidence_level'):
-    plt.figure(figsize=(10, 6))
-    plt.bar(confidence_levels, CI_count_per_confidence_level, width=0.05)
-    plt.xlabel('Confidence Level')
-    plt.ylabel('Count Within CI')
-    plt.title('Count of Ground Truth Sources Within Confidence Intervals at Different Confidence Levels')
-    plt.grid(True)
-    plt.xticks(ticks=confidence_levels, labels=[f'{int(cl*100)}%' for cl in confidence_levels])
-    plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
-    # plt.show()
+def plot_ci_count_per_confidence_level(
+    confidence_levels, 
+    CI_count_per_confidence_level, 
+    orientation_type='fixed',
+    experiment_dir=None, 
+    filename='ci_count_per_confidence_level'
+):
+    """
+    Plot the count of ground truth sources within confidence intervals at different confidence levels.
 
-def plot_active_sources_single_time_step(x, x_hat, active_set, time_step=0, experiment_dir=None, filename='active_sources_single_time_step'):
-    gt_active_sources = np.where(x[:, time_step] != 0)[0]
-    gt_amplitudes = x[gt_active_sources, time_step]
-    est_amplitudes = x_hat[active_set, time_step]
-    
-    plt.figure(figsize=(12, 6))
-    plt.scatter(gt_active_sources, gt_amplitudes, color='blue', alpha=0.6, label=f'Ground Truth (nnz={gt_active_sources.size})')
-    plt.scatter(active_set, est_amplitudes, color='red', marker='x', alpha=0.6, label=f'Estimated (nnz={active_set.size})')
-    plt.xlabel('Source Index')
-    plt.ylabel('Amplitude')
-    plt.title('Active Sources for GT and Estimated Sources')
-    plt.xlim(0, x.shape[0])
-    plt.tight_layout()
-    plt.legend(loc='upper left')
-    all_active_sources = np.union1d(gt_active_sources, active_set)
-    plt.xticks(all_active_sources, rotation=45, ha='right')
-    plt.grid(True, alpha=0.5)
-    plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
-    # plt.show()
-    
-def plot_posterior_covariance_matrix(posterior_cov, experiment_dir=None, filename='posterior_covariance_matrix'):
-    plt.figure(figsize=(10, 8))
-    plt.imshow(posterior_cov, cmap='viridis', aspect='auto')
-    plt.colorbar(label='Covariance Value')
-    plt.title('Posterior Covariance Matrix')
-    plt.xlabel('Sources')
-    plt.ylabel('Sources')
-    plt.grid(False)
-    plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
-    # plt.show()
+    Parameters:
+    ===========
+    confidence_levels (list): List of confidence levels.
+    CI_count_per_confidence_level (list): List of counts of ground truth sources within confidence intervals.
+    active_set_size (int): Size of the active set.
+    experiment_dir (str, optional): Directory to save the plot. Default is None.
+    filename (str, optional): Filename for the saved plot. Default is 'ci_count_per_confidence_level'.
+    orientation_type (str, optional): The type of orientation. Can be 'fixed' or 'free'. Default is 'fixed'.
 
-def plot_active_sources(x_hat, active_set, title='Posterior Mean Over Time', experiment_dir=None, filename='active_sources_over_time'):
-    plt.figure(figsize=(10, 6))
-    for i in active_set:
-        plt.plot(x_hat[i, :], label=f'Source {i+1}')
-    plt.xlabel('Time Points')
-    plt.ylabel('Source Activity')
-    plt.title(title)
-    plt.legend(loc='center left', bbox_to_anchor=(1, 0.5), borderaxespad=0., ncol=2)
-    plt.grid(True)
+    Returns:
+    ========
+    None
+    """
+    if orientation_type == 'free':
+        fig, axes = plt.subplots(3, 1, figsize=(10, 18), sharex=True, sharey=True)
+        orientations = ['X', 'Y', 'Z']
+        for i, ax in enumerate(axes):
+            ax.bar(confidence_levels, CI_count_per_confidence_level[:, i], width=0.05)
+            ax.set_ylabel('Count Within CI')
+            ax.grid(True)
+            ax.set_xticks(ticks=confidence_levels)
+            ax.set_xticklabels([f'{int(cl*100)}%' for cl in confidence_levels])
+            ax.set_title(f'Orientation {orientations[i]}')
+        
+        ax.set_xlabel('Confidence Level')
+        fig.suptitle('Count of Ground Truth Sources Within Confidence Intervals at Different Confidence Levels for Free Orientation\n')
+        fig.tight_layout()
+        plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
+        # plt.show()
+    else:
+        plt.figure(figsize=(10, 6))
+        plt.bar(confidence_levels, CI_count_per_confidence_level, width=0.05)
+        plt.xlabel('Confidence Level')
+        plt.ylabel('Count Within CI')
+        plt.title('Count of Ground Truth Sources Within Confidence Intervals at Different Confidence Levels')
+        plt.grid(True)
+        plt.xticks(ticks=confidence_levels, labels=[f'{int(cl*100)}%' for cl in confidence_levels])
+        plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
+        # plt.show()
+
+def plot_active_sources_single_time_step(
+    x: np.ndarray,
+    x_hat: np.ndarray,
+    active_set: np.ndarray,
+    time_step: int = 0,
+    orientation_type: str = 'fixed',
+    experiment_dir: str = None,
+    filename: str = 'active_sources_single_time_step'
+) -> None:
+    """
+    Plot the active sources for a single time step, comparing ground truth and estimated sources.
+
+    Parameters:
+    ===========
+    x (np.ndarray): Ground truth source activities, shape (n_sources, n_times).
+    x_hat (np.ndarray): Estimated source activities, shape (n_sources, n_times).
+    active_set (np.ndarray): Indices of active sources in the estimated data.
+    time_step (int, optional): The time step to plot. Default is 0.
+    orientation_type (str, optional): The type of orientation. Can be 'fixed' or 'free'. Default is 'fixed'.
+    experiment_dir (str, optional): Directory to save the plot. Default is None.
+    filename (str, optional): Filename for the saved plot. Default is 'active_sources_single_time_step'.
+
+    Returns:
+    ========
+    None
+    
+    Notes:
+    ======
+    - When orientation_type is 'free', the function will plot three subplots corresponding to the X, Y, and Z orientations.
+    """
+    if orientation_type == 'free':
+        fig, axes = plt.subplots(3, 1, figsize=(12, 18))
+        orientations = ['X', 'Y', 'Z']
+        for i, ax in enumerate(axes):
+            gt_active_sources = np.where(x[:, time_step] != 0)[0] // 3
+            gt_amplitudes = x[gt_active_sources * 3 + i, time_step]
+            est_amplitudes = x_hat[active_set[i::3], time_step]
+            
+            ax.scatter(gt_active_sources, gt_amplitudes, color='blue', alpha=0.6, label=f'Ground Truth (nnz={gt_active_sources.size})')
+            ax.scatter(active_set[i::3] // 3, est_amplitudes, color='red', marker='x', alpha=0.6, label=f'Estimated (nnz={active_set[i::3].size})')
+            ax.set_xlabel('Source Index')
+            ax.set_ylabel('Amplitude')
+            ax.set_title(f'Orientation {orientations[i]}')
+            ax.set_xlim(0, x.shape[0] // 3)
+            ax.legend(loc='upper left')
+            all_active_sources = np.union1d(gt_active_sources, active_set[i::3] // 3)
+            ax.set_xticks(all_active_sources)
+            ax.set_xticklabels([f'{idx}' for idx in all_active_sources], rotation=45, ha='right')
+            ax.grid(True, alpha=0.5)
+        fig.suptitle(f"Active Sources for GT and Estimated Sources\n")
+        plt.tight_layout()
+        plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
+        # plt.show()
+    else:
+        gt_active_sources = np.where(x[:, time_step] != 0)[0]
+        gt_amplitudes = x[gt_active_sources, time_step]
+        est_amplitudes = x_hat[active_set, time_step]
+        
+        plt.figure(figsize=(12, 6))
+        plt.scatter(gt_active_sources, gt_amplitudes, color='blue', alpha=0.6, label=f'Ground Truth (nnz={gt_active_sources.size})')
+        plt.scatter(active_set, est_amplitudes, color='red', marker='x', alpha=0.6, label=f'Estimated (nnz={active_set.size})')
+        plt.xlabel('Source Index')
+        plt.ylabel('Amplitude')
+        plt.title('Active Sources for GT and Estimated Sources')
+        plt.xlim(0, x.shape[0])
+        plt.tight_layout()
+        plt.legend(loc='upper left')
+        all_active_sources = np.union1d(gt_active_sources, active_set)
+        plt.xticks(all_active_sources, rotation=45, ha='right')
+        plt.grid(True, alpha=0.5)
+        plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
+        # plt.show()
+    
+    
+def plot_posterior_covariance_matrix(
+    posterior_cov: np.ndarray,
+    orientation_type: str = 'fixed',
+    experiment_dir: str = None,
+    filename: str = 'posterior_covariance_matrix'
+) -> None:
+    """
+    Plot the posterior covariance matrix.
+
+    Parameters:
+    ===========
+    posterior_cov (np.ndarray): The posterior covariance matrix, shape (n_sources, n_sources).
+    orientation_type (str, optional): The type of orientation. Can be 'fixed' or 'free'. Default is 'fixed'.
+    experiment_dir (str, optional): Directory to save the plot. Default is None.
+    filename (str, optional): Filename for the saved plot. Default is 'posterior_covariance_matrix'.
+
+    Returns:
+    ========
+    None
+
+    Notes:
+    ======
+    - When orientation_type is 'free', the function will plot three subplots corresponding to the X, Y, and Z orientations.
+    - The covariance matrix is split into three sub-matrices for each orientation.
+    - The color scale is consistent across all subplots to allow for comparison.
+    """
+    if orientation_type == 'free':
+        fig, axes = plt.subplots(3, 1, figsize=(10, 18))
+        orientations = ['X', 'Y', 'Z']
+        vmin = np.min(posterior_cov)
+        vmax = np.max(posterior_cov)
+        for i, ax in enumerate(axes):
+            cov_matrix = posterior_cov[i::3, i::3]
+            im = ax.imshow(cov_matrix, cmap='viridis', aspect='auto', vmin=vmin, vmax=vmax)
+            ax.set_title(f'Orientation {orientations[i]}')
+            ax.set_xlabel('Sources')
+            ax.set_ylabel('Sources')
+        cbar = fig.colorbar(im, ax=axes, orientation='vertical', fraction=0.02, pad=0.04)
+        cbar.ax.set_ylabel('Covariance Value')
+        fig.suptitle(f"Posterior Covariance Matrix\n")
+
+    else:
+        plt.figure(figsize=(10, 8))
+        im = plt.imshow(posterior_cov, cmap='viridis', aspect='auto')
+        cbar = plt.colorbar(im, label='Covariance Value')
+        plt.title('Posterior Covariance Matrix')
+        plt.xlabel('Sources')
+        plt.ylabel('Sources')
+        
     plt.tight_layout(rect=[0, 0, 0.85, 1])
-    total_sources = x_hat.shape[0]
-    plt.text(0.95, 0.95, f'Total Sources: {total_sources}', 
-             horizontalalignment='right', verticalalignment='top', 
-             transform=plt.gca().transAxes, fontsize=12, bbox=dict(facecolor='white', alpha=0.6))
     plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
+
+
+# def plot_active_sources(x_hat, active_set, title='Posterior Mean Over Time', experiment_dir=None, filename='active_sources_over_time'):
+#     plt.figure(figsize=(10, 6))
+#     for i in active_set:
+#         plt.plot(x_hat[i, :], label=f'Source {i+1}')
+#     plt.xlabel('Time Points')
+#     plt.ylabel('Source Activity')
+#     plt.title(title)
+#     plt.legend(loc='center left', bbox_to_anchor=(1, 0.5), borderaxespad=0., ncol=2)
+#     plt.grid(True)
+#     plt.tight_layout(rect=[0, 0, 0.85, 1])
+#     total_sources = x_hat.shape[0]
+#     plt.text(0.95, 0.95, f'Total Sources: {total_sources}', 
+#              horizontalalignment='right', verticalalignment='top', 
+#              transform=plt.gca().transAxes, fontsize=12, bbox=dict(facecolor='white', alpha=0.6))
+#     plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
     # plt.show()
+
+def plot_ci_times(
+    x: np.ndarray, 
+    x_hat: np.ndarray, 
+    active_set: list, 
+    ci_lower: np.ndarray, 
+    ci_upper: np.ndarray, 
+    figsize: tuple, 
+    title: str = 'Estimated Source Activity with Confidence Intervals', 
+    experiment_dir: str = None, 
+    filename: str = 'all_ci_times',
+    orientation_type: str = 'fixed',
+):
+    """
+    Plots the estimated source activity with confidence intervals.
+
+    Parameters:
+    ===========
+    x (np.ndarray): Ground truth source activity, shape (n_sources,).
+    x_hat (np.ndarray): Posterior mean estimates of source activity, shape (n_sources,).
+    active_set (list): List of active sources.
+    ci_lower (np.ndarray): Lower bounds of the confidence intervals, shape (n_sources,).
+    ci_upper (np.ndarray): Upper bounds of the confidence intervals, shape (n_sources,).
+    figsize (tuple): Size of the figure.
+    title (str, optional): Title of the plot. Default is 'Estimated Source Activity with Confidence Intervals'.
+    experiment_dir (str, optional): Directory to save the plot. Default is None.
+    filename (str, optional): Filename to save the plot. Default is 'all_ci_times'.
+    orientation_type (str, optional): The type of orientation. Can be 'fixed' or 'free'. Default is 'fixed'.
+
+    Returns:
+    ========
+    None
     
-def plot_ci_times(x_hat, ci_lower, ci_upper, x, active_set, figsize, title='Estimated Source Activity with Confidence Intervals', experiment_dir=None, filename='all_ci_times'):
+    Note:
+    =====
+    - When orientation_type is 'free', the function will plot three subplots corresponding to the X, Y, and Z orientations.
+
+    """
     n_sources = x_hat.shape[0]
-    n_times = x_hat.shape[1] 
 
-    fig, axes = plt.subplots(1, n_times, figsize=figsize, sharey=False)
-    if n_times == 1:
-        axes = [axes]
-
-    for t in range(n_times):
+    if orientation_type == 'free':
+        fig, axes = plt.subplots(3, 1, figsize=figsize, sharey=True)
+        orientations = ['X', 'Y', 'Z']
+        for j, (ax, orient) in enumerate(zip(axes, orientations)):
+            for i in range(n_sources // 3):
+                idx = i * 3 + j
+                ax.scatter(i, x_hat[idx], marker='x', color='red', label='Posterior Mean' if i == 0 else "")  
+                ax.fill_between(
+                    [i - 0.5, i + 0.5], 
+                    ci_lower[idx], 
+                    ci_upper[idx], 
+                    alpha=0.3,
+                    label='Confidence Interval' if i == 0 else ""
+                )
+                ax.scatter(i, x[idx], s=10, color='blue', label='Ground Truth' if i == 0 else "")
+            ax.set_title(f'Orientation {orient}')
+            ax.axhline(0, color='grey', lw=0.8, ls='-')
+            ax.legend(loc='upper right', title=f'(Total Sources: {n_sources // 3})')
+            ax.set_xticks(np.arange(n_sources // 3))
+            ax.set_xticklabels([i for i in active_set[::3] // 3], rotation=45)
+        fig.suptitle(title)
+        fig.text(0.5, 0.04, 'Source index', ha='center')
+        fig.text(0.04, 0.5, 'Estimated Activity', va='center', rotation='vertical')
+        fig.suptitle('Estimated Source Activity with Confidence Intervals for free orientation\n', fontsize=20)
+    else:
+        fig, ax = plt.subplots(figsize=figsize)
         for i in range(n_sources):             
-            axes[t].scatter(i, x_hat[i, t], marker='x', color='red', label='Posterior Mean' if i == 0 else "")  
-            axes[t].fill_betweenx(
-                [ci_lower[i, t], ci_upper[i, t]], 
-                i - 0.5, 
-                i + 0.5, 
+            ax.scatter(i, x_hat[i], marker='x', color='red', label='Posterior Mean' if i == 0 else "")  
+            ax.fill_between(
+                [i - 0.5, i + 0.5], 
+                ci_lower[i], 
+                ci_upper[i], 
                 alpha=0.3,
                 label='Confidence Interval' if i == 0 else ""
             )
-            axes[t].scatter(i, x[i, t], s=10, color='blue', label='Ground Truth' if i == 0 else "")
-        axes[t].set_title(title)
-        axes[t].set_xticks(np.arange(n_sources))
-        axes[t].set_xticklabels([f'Source {idx}' for idx in active_set], rotation=45)
-        axes[t].axhline(0, color='grey', lw=0.8, ls='-')
+            ax.scatter(i, x[i], s=10, color='blue', label='Ground Truth' if i == 0 else "")
+        ax.set_xticks(np.arange(n_sources))
+        ax.set_xticklabels([f'{idx}' for idx in active_set], rotation=45)
+        ax.set_title(title)
+        ax.axhline(0, color='grey', lw=0.8, ls='-')
+        ax.legend(loc='upper right', title=f'(Total Sources: {n_sources}, Active Sources: {len(active_set)})')
+        fig.text(0.5, 0.04, 'Source index', ha='center')
+        fig.text(0.04, 0.5, 'Estimated Activity', va='center', rotation='vertical')
 
-    fig.suptitle('Estimated Source Activity with Confidence Intervals')
-    fig.text(0.5, 0.04, 'Sources', ha='center')
-    fig.text(0.04, 0.5, 'Estimated Activity', va='center', rotation='vertical')
     plt.tight_layout(rect=[0.05, 0.05, 0.95, 0.95])
-    plt.legend(loc='upper right', bbox_to_anchor=(1.05, 1), borderaxespad=0.)
     plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
     # plt.show()
-
-def plot_ci_sources(x_hat, ci_lower, ci_upper, x, figsize, experiment_dir=None, filename='all_ci_sources'):
-    n_sources = x_hat.shape[0]
-    n_times = x_hat.shape[1]
+ 
+# def plot_ci_sources(x_hat, ci_lower, ci_upper, x, figsize, experiment_dir=None, filename='all_ci_sources'):
+#     n_sources = x_hat.shape[0]
+#     n_times = x_hat.shape[1]
     
-    n_cols = min(5, n_sources)
-    n_rows = (n_sources + n_cols - 1) // n_cols
-    time_points = np.linspace(0, 1, n_times)
+#     n_cols = min(5, n_sources)
+#     n_rows = (n_sources + n_cols - 1) // n_cols
+#     time_points = np.linspace(0, 1, n_times)
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize, sharex=True, sharey=False, constrained_layout=True)
-    axes = axes.flatten()
+#     fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize, sharex=True, sharey=False, constrained_layout=True)
+#     axes = axes.flatten()
 
-    for i in range(n_sources):
-        axes[i].plot(time_points, x_hat[i, :], marker='o', label='Posterior Mean')  
-        axes[i].fill_between(
-            time_points,
-            ci_lower[i, :],
-            ci_upper[i, :],
-            alpha=0.3,
-            label='Confidence Interval'
-        )
-        axes[i].scatter(time_points, x[i, :], color='red', s=10, label='Ground Truth')
-        axes[i].set_title(f'Source {i + 1}')
-        axes[i].axhline(0, color='grey', lw=0.8, ls='--')
-        axes[i].grid()
-        axes[i].set_xlabel('Time') 
+#     for i in range(n_sources):
+#         axes[i].plot(time_points, x_hat[i, :], marker='o', label='Posterior Mean')  
+#         axes[i].fill_between(
+#             time_points,
+#             ci_lower[i, :],
+#             ci_upper[i, :],
+#             alpha=0.3,
+#             label='Confidence Interval'
+#         )
+#         axes[i].scatter(time_points, x[i, :], color='red', s=10, label='Ground Truth')
+#         axes[i].set_title(f'Source {i + 1}')
+#         axes[i].axhline(0, color='grey', lw=0.8, ls='--')
+#         axes[i].grid()
+#         axes[i].set_xlabel('Time') 
 
-    for ax in axes:
-        ax.set_ylabel('')  
+#     for ax in axes:
+#         ax.set_ylabel('')  
 
-    fig.text(0.04, 0.5, 'Estimated Activity', va='center', rotation='vertical')
+#     fig.text(0.04, 0.5, 'Estimated Activity', va='center', rotation='vertical')
 
-    for j in range(n_sources, n_rows * n_cols):
-        fig.delaxes(axes[j])
+#     for j in range(n_sources, n_rows * n_cols):
+#         fig.delaxes(axes[j])
 
-    fig.suptitle('Estimated Source Activity with Confidence Intervals')
-    plt.tight_layout(rect=[0.05, 0.05, 0.95, 0.95])
-    plt.legend(loc='upper right', bbox_to_anchor=(1.05, 1), borderaxespad=0.)
-    plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
-    # plt.show()
+#     fig.suptitle('Estimated Source Activity with Confidence Intervals')
+#     plt.tight_layout(rect=[0.05, 0.05, 0.95, 0.95])
+#     plt.legend(loc='upper right', bbox_to_anchor=(1.05, 1), borderaxespad=0.)
+#     plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
+#     # plt.show()
+def plot_proportion_of_hits(
+    confidence_levels, 
+    CI_count_per_confidence_level, 
+    total_sources, 
+    orientation_type='fixed',
+    experiment_dir=None, 
+    filename='proportion_of_hits', 
+):
+    """
+    Plot the proportion of hits within confidence intervals at different confidence levels.
 
-def plot_proportion_of_hits(confidence_levels, CI_count_per_confidence_level, total_sources, experiment_dir=None, filename='proportion_of_hits'):
-    hits = np.array(CI_count_per_confidence_level)
-    misses = total_sources - hits
-    proportions = hits / (hits + misses)
+    Parameters:
+    ===========
+    confidence_levels (list): List of confidence levels.
+    CI_count_per_confidence_level (list): List of counts of ground truth sources within confidence intervals.
+    total_sources (int): Total number of sources.
+    experiment_dir (str, optional): Directory to save the plot. Default is None.
+    filename (str, optional): Filename for the saved plot. Default is 'proportion_of_hits'.
+    orientation_type (str, optional): The type of orientation. Can be 'fixed' or 'free'. Default is 'fixed'.
 
-    plt.figure(figsize=(10, 6))
-    plt.bar(confidence_levels, proportions, width=0.05)
-    plt.xlabel('Confidence Level')
-    plt.ylabel('Proportion of Hits (hits / (hits + misses))')
-    plt.title('Proportion of Hits Within Confidence Intervals')
-    plt.grid(True)
-    plt.xticks(ticks=confidence_levels, labels=[f'{int(cl*100)}%' for cl in confidence_levels])
-    plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
-    # plt.show()
-    hits = np.array(CI_count_per_confidence_level)
-    misses = total_sources - hits
-    proportions = hits / (hits + misses)
+    Returns:
+    ========
+    None
+    """
+    if orientation_type == 'free':
+        fig, axes = plt.subplots(3, 1, figsize=(10, 18), sharex=True, sharey=True)
+        orientations = ['X', 'Y', 'Z']
+        for i, ax in enumerate(axes):
+            hits = np.array(CI_count_per_confidence_level[:, i])
+            misses = total_sources // 3 - hits
+            proportions = hits / (hits + misses)
+            ax.bar(confidence_levels, proportions, width=0.05)
+            ax.set_ylabel('Proportion of Hits')
+            ax.grid(True)
+            ax.set_xticks(ticks=confidence_levels)
+            ax.set_xticklabels([f'{int(cl*100)}%' for cl in confidence_levels])
+            ax.set_title(f'Orientation {orientations[i]}')
+        
+        ax.set_xlabel('Confidence Level')
+        fig.suptitle('Proportion of Hits Within Confidence Intervals at Different Confidence Levels for Free Orientation\n')
+        fig.tight_layout()
+        plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
+        # plt.show()
+    else:
+        hits = np.array(CI_count_per_confidence_level)
+        misses = total_sources - hits
+        proportions = hits / (hits + misses)
 
-    plt.figure(figsize=(10, 6))
-    plt.bar(confidence_levels, proportions, width=0.05)
-    plt.xlabel('Confidence Level')
-    plt.ylabel('Proportion of Hits (hits / (hits + misses))')
-    plt.title('Proportion of Hits Within Confidence Intervals')
-    plt.grid(True)
-    plt.xticks(ticks=confidence_levels, labels=[f'{int(cl*100)}%' for cl in confidence_levels])
-    plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))   
+        plt.figure(figsize=(10, 6))
+        plt.bar(confidence_levels, proportions, width=0.05)
+        plt.xlabel('Confidence Level')
+        plt.ylabel('Proportion of Hits (hits / (hits + misses))')
+        plt.title('Proportion of Hits Within Confidence Intervals')
+        plt.grid(True)
+        plt.xticks(ticks=confidence_levels, labels=[f'{int(cl*100)}%' for cl in confidence_levels])
+        plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
+        # plt.show()
     # plt.show()
   
     
+
+
     
-    
-    
-    
-    
-# ------------- Confidence Ellipses ------------
-
-
-
-
-
-
+# ------------- Confidence Ellipses (eigenvalues) ------------
 
 def plot_sorted_variances(cov, experiment_dir, filename="sorted_variances", top_k=None):
     """
@@ -419,7 +721,7 @@ def visualize_sorted_covariances(cov, experiment_dir, filename="sorted_covarianc
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
     # plt.show()
-    plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))   
+    plt.savefig(os.path.join(experiment_dir, f'{filename}.png'))
     
 
 def make_psd(cov, epsilon=1e-6):

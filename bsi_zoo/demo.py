@@ -18,16 +18,7 @@ import matplotlib.pyplot as plt
 from mne.datasets import fetch_fsaverage, sample
 import multiprocessing
 
-
-mean = np.random.randn(10)
-cov = np.random.randn(10, 10)
-cov = np.dot(cov, cov.T)
-
 top_k = 5
-# plot_sorted_variances(cov, "experiment_results", top_k=top_k)
-# visualize_sorted_covariances(cov, "experiment_results", top_k=top_k)
-# plot_top_relevant_CE_pairs(mean, cov, "experiment_results", top_k=5, confidence_level=0.95)
-
 
 # load src space
 data_path = sample.data_path()
@@ -68,9 +59,10 @@ subject = "fsaverage"
 
 # Load gamma initialization parameters
 # gamma_init = config['estimator_extra_params']['gammas']
-path_to_leadfield = get_leadfield_path(subject, type='fixed')
+path_to_leadfield = get_leadfield_path(subject, type='free')
 lead_field = np.load(path_to_leadfield, allow_pickle=True)
 L = lead_field["lead_field"]
+L = L.reshape(L.shape[0], -1)
         
 
 # Metrics for benchmarking
@@ -109,8 +101,7 @@ metrics = [
 # np.savez_compressed('bsi_zoo/data/est_data.npz', x=x, x_hat=x_hat, y=y, L=L, cov=cov, active_set=active_set, posterior_cov=posterior_cov, data_args_II=data_args_II, estimator_args=estimator_args, estimator_extra_params=estimator_extra_params, allowpickle=True)
 """
 
-print("------------------ Done! ------------------")
-
+"""
 # def check_symmetric(a, rtol=1e-03, atol=1e-03):
 #     print(np.allclose(a, a.T, rtol=rtol, atol=atol))
 # check_symmetric(posterior_cov)
@@ -129,18 +120,18 @@ print("------------------ Done! ------------------")
 
 # plot_active_sources(x_hat, active_set, 'Posterior Mean Over Time')
 # plot_active_sources(x, np.where(x[:, 0] != 0)[0], 'Ground Truth Source Activity Over Time')
-
+"""
 
 # --------------------------------------------------------------------------------
 base_dir = "experiment_results"
 
 
 estimators = [gamma_map]
-orientation_types = ["fixed"]
+orientation_types = ["free"]
 cov_types = ["diag"]
 noise_types = ["scaled_identity"]
-alpha_snrs = [0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.99]
-nnzs = [1, 3, 5, 10, 20]
+alpha_snrs = [0.1, 0.4, 0.7, 0.99]
+nnzs = [1, 5, 10, 20]
 n_times = 2
 estimator_alphas = [None] # np.logspace(0, -2, 10)[1:]
 estimator_args = {"alpha": estimator_alphas}
@@ -225,11 +216,18 @@ for estimator in estimators:
                                     
                                     print(f"------------------ Done {estimator.__name__}! ------------------")
 
-                                    x_t0 = x[:, 0]
-                                    x_hat_t0 = x_hat[:, 0]
+                                    if orientation_type == "free":
+                                        x = x.reshape(-1, n_times)
+                                        x_hat = x_hat.reshape(-1, n_times)
+                                    
+                                    x_t0 = x[..., 0]
+                                    x_hat_t0 = x_hat[..., 0]
                                     
                                     # Create a full covariance matrix with zeros
-                                    full_posterior_cov = np.zeros((x_hat.shape[0], x_hat.shape[0]))
+                                    full_posterior_cov = np.zeros((
+                                        x_hat_t0.flatten().shape[0],
+                                        x_hat_t0.flatten().shape[0]
+                                    ))
 
                                     # Fill in the active set covariance values
                                     for i, idx_i in enumerate(active_set):
@@ -272,9 +270,9 @@ for estimator in estimators:
                                     
                                     # --------------------------------------------------
                                     
-                                    plot_active_sources_single_time_step(x, x_hat, active_set, time_step=0, experiment_dir=experiment_dir)
+                                    plot_active_sources_single_time_step(x, x_hat, active_set, time_step=0,orientation_type=orientation_type, experiment_dir=experiment_dir)
                                     
-                                    plot_posterior_covariance_matrix(posterior_cov, experiment_dir)
+                                    plot_posterior_covariance_matrix(posterior_cov, orientation_type=orientation_type, experiment_dir=experiment_dir)
                                     
                                     # --------------------------------------------------
                                                                     
@@ -291,43 +289,58 @@ for estimator in estimators:
                                             # )
                                             
                                             ci_lower, ci_upper = compute_confidence_intervals(
-                                                x_hat_t0[active_set], posterior_cov, confidence_level
+                                                x_hat_t0[active_set], posterior_cov, orientation_type=orientation_type, confidence_level=confidence_level
                                             )
+                                            # IMPORTANT: We only want to count the sources that are active
+                                            count_within_ci = count_values_within_ci(x_t0[active_set], ci_lower, ci_upper, orientation_type=orientation_type)
                                             
-                                            count_within_ci = count_values_within_ci(x_t0[active_set], ci_lower, ci_upper)
                                             
-                                            print(f"Confidence lvl: {confidence_level:.2f}, Count Within CI: {count_within_ci}")
-                                            CI_count_per_confidence_level.append(count_within_ci)
+                                            if orientation_type == "fixed":        
+                                                print(f"Confidence level: {confidence_level:.2f}, Count within CI: {count_within_ci}")
+                                            elif orientation_type == "free":
+                                                print(f"Confidence level: {confidence_level:.2f}, Count within CI for each orientation (X, Y, Z): {count_within_ci}")
+                                            
 
                                             plot_ci_times(
-                                                x_hat_t0[:, np.newaxis][active_set],
-                                                ci_lower[:, np.newaxis],#[active_set],
-                                                ci_upper[:, np.newaxis],#[active_set],
-                                                x_t0[:, np.newaxis][active_set],
+                                                x_t0[active_set],
+                                                x_hat_t0[active_set],
                                                 active_set,
-                                                figsize=(30,7),
+                                                ci_lower, #[active_set],
+                                                ci_upper, #[active_set],
+                                                figsize=(20,15),
                                                 title=f'confidence level {(confidence_level*100):.0f}%',
                                                 experiment_dir=os.path.join(experiment_dir, 'CI'),
-                                                filename=f'CI_{round(confidence_level, 2)}',)
+                                                filename=f'CI_{round(confidence_level, 2)}',
+                                                orientation_type=orientation_type)
 
+                                            CI_count_per_confidence_level.append(count_within_ci)
+                                    
+                                    CI_count_per_confidence_level = np.array(CI_count_per_confidence_level)
+                                    
                                     plot_ci_count_per_confidence_level(
                                         confidence_levels, 
                                         CI_count_per_confidence_level,
-                                        active_set.shape[0],
+                                        orientation_type=orientation_type,
                                         experiment_dir=experiment_dir)
 
                                     plot_proportion_of_hits(
                                         confidence_levels,
                                         CI_count_per_confidence_level,
-                                        x[active_set].shape[0],
-                                        experiment_dir=experiment_dir)
+                                        total_sources=x[active_set].shape[0],
+                                        experiment_dir=experiment_dir,
+                                        orientation_type=orientation_type,)
                                     
                                     # --------------------------------------------------
 
                                     # Ensure the number of vertices matches the data
                                     n_sources = sum(len(v) for v in vertices)
-                                    if x.shape[0] != n_sources:
-                                        raise ValueError(f"Data has {x.shape[0]} sources, but source space has {n_sources} sources!")
+                                    
+                                    if orientation_type == "fixed":
+                                        if x.shape[0] != n_sources:
+                                            raise ValueError(f"Data has {x.shape[0]} sources, but source space has {n_sources}sources!")
+                                    elif orientation_type == "free":
+                                        if x.shape[0] != n_sources * 3:
+                                            raise ValueError(f"Data has {x.shape[0]} sources, but source space has {n_sources} sources!")
 
                                     # --------------------------------------------------
                                     
